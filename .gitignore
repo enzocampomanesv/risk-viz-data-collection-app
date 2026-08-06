@@ -6,6 +6,8 @@ dashboard/*.key.json
 dashboard/__pycache__/
 dashboard/.venv/
 *.pyc
-
+images/
+notes.txt
+paper3_research_plan.docx
 # OS
 .DS_Store
