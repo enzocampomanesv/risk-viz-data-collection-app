@@ -126,3 +126,10 @@
 .poll-opt--lead .poll-opt__fill { background: var(--color-success); }
 .poll-opt--lead .poll-opt__text { font-weight: 600; }
 .poll-q__total { margin-top: 0.35rem; font-size: 0.82rem; }
+
+/* Verbatim "Other" free-text answers under a questionnaire choice question. */
+.poll-q__others { margin: 0.5rem 0 0.2rem; padding-left: 0.2rem; }
+.poll-q__others-h { font-size: 0.78rem; margin-bottom: 0.3rem; }
+.poll-other { font-size: 0.85rem; padding: 0.25rem 0; border-top: 1px solid var(--color-border); }
+.poll-other:first-of-type { border-top: none; }
+.poll-other code { color: var(--color-muted); margin-right: 0.4rem; }

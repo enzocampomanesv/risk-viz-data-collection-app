@@ -14,66 +14,15 @@ function esc(s) {
 
 const SECTION_LABELS = {
   consent: "Consent", registration: "Registration",
-  word_association: "Word association", discussion: "Discussion",
-  likert: "Likert", pairwise: "Pairwise comparison", choice: "Choice questions"
+  questionnaire: "Questionnaire", discussion: "Discussion",
+  likert: "Likert"
 };
-const labelFor = (s) => SECTION_LABELS[s.type] || s.id;
+const labelFor = (s) => (s.label ? s.label : (SECTION_LABELS[s.type] || s.id));
 
 const BACK_TOGGLES = [
-  { key: "pairwise", label: "Pairwise comparison", sub: "control/back_pairwise" },
-  { key: "choice",   label: "Choice questions",    sub: "control/back_choice" },
-  { key: "end",      label: "End screen",          sub: "control/back_end" },
+  { key: "questionnaire", label: "Questionnaire", sub: "control/back_questionnaire" },
+  { key: "end",           label: "End screen",    sub: "control/back_end" },
 ];
-
-/* ------------------ in-browser quick-look analytics ------------------ */
-// Same probability model as the AI-voter training: P(a>b)=sigmoid(strength_a-strength_b).
-// Per-item strengths fit by gradient-descent MLE with light L2 (validated r≈0.97 vs Python).
-function btFit(winnerLoser, itemIds, reg = 1e-2, iters = 600, lr = 1.0) {
-  const idx = {}; itemIds.forEach((it, i) => { idx[it] = i; });
-  const n = itemIds.length;
-  const pairs = winnerLoser.filter((c) => c[0] in idx && c[1] in idx).map((c) => [idx[c[0]], idx[c[1]]]);
-  const counts = new Array(n).fill(0), wins = new Array(n).fill(0);
-  pairs.forEach(([w, l]) => { counts[w]++; counts[l]++; wins[w]++; });
-  let beta = new Array(n).fill(0);
-  if (pairs.length) {
-    for (let t = 0; t < iters; t++) {
-      const g = new Array(n).fill(0);
-      for (const [w, l] of pairs) {
-        const oneMinusP = 1 / (1 + Math.exp(beta[w] - beta[l]));
-        g[w] -= oneMinusP; g[l] += oneMinusP;
-      }
-      for (let i = 0; i < n; i++) { g[i] = g[i] / pairs.length + reg * beta[i]; beta[i] -= lr * g[i]; }
-    }
-    const mean = beta.reduce((a, b) => a + b, 0) / n;
-    beta = beta.map((b) => b - mean);
-  } else beta = beta.map(() => NaN);
-  return itemIds.map((it, i) => ({ item: it, strength: beta[i], n: counts[i], wins: wins[i], winRate: counts[i] ? wins[i] / counts[i] : NaN }))
-    .sort((a, b) => (b.strength || -1e9) - (a.strength || -1e9));
-}
-
-function connectivity(winnerLoser, itemIds) {
-  const parent = {}; itemIds.forEach((it) => { parent[it] = it; });
-  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
-  const seen = new Set();
-  winnerLoser.forEach(([a, b]) => { if (a in parent && b in parent) { parent[find(a)] = find(b); seen.add(a); seen.add(b); } });
-  const roots = new Set(itemIds.map(find));
-  return { components: roots.size, isolated: itemIds.filter((it) => !seen.has(it)) };
-}
-
-function normCdf(z) { // Abramowitz-Stegun
-  const t = 1 / (1 + 0.2316419 * Math.abs(z));
-  const d = 0.3989423 * Math.exp(-z * z / 2);
-  let p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
-  return z > 0 ? 1 - p : p;
-}
-function positionBias(rows) {
-  const d = rows.filter((r) => r.winner && r.shown_left);
-  const n = d.length;
-  if (!n) return { n: 0, leftRate: NaN, p: NaN };
-  const leftWins = d.filter((r) => r.winner === r.shown_left).length;
-  const z = (leftWins - n / 2) / Math.sqrt(n / 4);
-  return { n, leftRate: leftWins / n, p: 2 * (1 - normCdf(Math.abs(z))) };
-}
 
 function toCSV(rows, cols) {
   const head = cols.join(",");
@@ -353,9 +302,9 @@ const Control = {
     if (btn) { btn.textContent = open ? "Re-hold" : "Release"; btn.className = "btn-sm " + (open ? "" : "btn-sm--accent"); }
   },
 
-  /* --------------------- back-button visibility (pairwise/choice/end) --------------------- */
+  /* --------------------- back-button visibility (questionnaire/end) --------------------- */
   wireBackFlags() {
-    this.state.backFlags = this.state.backFlags || { pairwise: false, choice: false, end: false };
+    this.state.backFlags = this.state.backFlags || { questionnaire: false, end: false };
     this.el().querySelectorAll(".row[data-backflag]").forEach((row) => {
       const key = row.dataset.backflag;
       row.querySelector(".backflag-toggle").addEventListener("click", async () => {
@@ -454,7 +403,7 @@ const Control = {
       if (el) el.textContent = (b && b.text) ? `Currently showing: "${b.text}"` : "Nothing showing now.";
     });
 
-    ["pairwise", "choice", "end"].forEach((key) => {
+    ["questionnaire", "end"].forEach((key) => {
       this.db.ref(`control/back_${key}`).on("value", (s) => {
         this.state.backFlags[key] = s.val() === true;
         this.paintBackFlags();
@@ -465,9 +414,8 @@ const Control = {
       const all = s.val() || {};
       this.state.participantsRaw = all;
       this.state.participants = Object.keys(all).map((uid) => all[uid]);
-      // Participant progress (e.g. finishing pairwise) and pw_plan changes arrive
-      // here, not via the comparisons stream — flag the live view dirty so the
-      // Results-tab pairwise-progress card reflects them on the next 3s tick.
+      // Participant progress and participant_no changes arrive here — flag the
+      // live view dirty so the Results tab reflects them on the next 3s tick.
       this._dirty = true;
       this.renderMonitor();
     });
@@ -526,16 +474,11 @@ const Control = {
     const host = document.getElementById("tab-results");
     host.innerHTML = `<div class="card"><div class="muted">Connecting live to "${esc(this.state.session)}"…</div></div>`;
     this.stopLive();
-    this.live = { comparisons: [] };
     this.results = { words: {}, assess: {}, choices: {} };
     this._dirty = true; this._paused = false; this._lastUpdate = null; this._liveRefs = []; this._cloudsDrawn = false;
     this.viewSession = this.state.session;
 
     const addRef = (path, ev, cb) => { const r = this.db.ref(path); r.on(ev, cb); this._liveRefs.push([r, ev, cb]); };
-    // Append-only comparison stream: child_added gives existing rows then each new
-    // vote. Single node since the Stage-3 redesign (was visual_/text_comparisons);
-    // each row carries its own `group`, so per-group BT is a filter, not a node.
-    addRef("comparisons", "child_added", (s) => { this.live.comparisons.push(Object.assign({ id: s.key }, s.val())); this._dirty = true; });
     // Small per-user nodes: keep a fresh full snapshot.
     addRef("assessments", "value", (s) => { this.results.assess = s.val() || {}; this._dirty = true; });
     addRef("choices", "value", (s) => { this.results.choices = s.val() || {}; this._dirty = true; });
@@ -545,7 +488,7 @@ const Control = {
     });
 
     this.renderResults();                                // build the shell (incl. word clouds)
-    setTimeout(() => this.renderLive(true), 500);        // first paint once child_added has settled
+    setTimeout(() => this.renderLive(true), 500);        // first paint once snapshots have settled
     this._liveTimer = setInterval(() => { if (this._dirty && !this._paused) this.renderLive(); }, 3000);
   },
 
@@ -567,10 +510,10 @@ const Control = {
         <label class="live-sess">Session <select id="view-session">${opts}</select></label>
         <button id="live-pause" class="btn-sm">Pause</button>
       </div>
-      <p class="hint" style="margin:.2rem 0 .7rem">Rankings &amp; Likert update every 3s; word clouds update when you change a filter or press Redraw. Viewing a past session shows static history. The Python dashboard remains the home for SQLite export &amp; full BT.</p>
+      <p class="hint" style="margin:.2rem 0 .7rem">Choice results &amp; Likert update every 3s; word clouds update when you change a filter or press Redraw. Viewing a past session shows static history. The Python dashboard remains the home for SQLite export.</p>
       <div id="r-words"></div><div id="r-likert"></div>
       <div id="r-choice"></div>
-      <div id="r-pwprog"></div><div id="r-bt"></div><div id="r-export"></div>`;
+      <div id="r-export"></div>`;
     document.getElementById("live-pause").addEventListener("click", (e) => {
       this._paused = !this._paused;
       e.target.textContent = this._paused ? "Resume" : "Pause";
@@ -605,25 +548,32 @@ const Control = {
     this._dirty = false;
     this._lastUpdate = new Date();
     this.renderLikert(document.getElementById("r-likert"));
-    this.renderChoiceResults(document.getElementById("r-choice"));
-    this.renderPairwiseProgress(document.getElementById("r-pwprog"));
-    this.renderBtCard(document.getElementById("r-bt"));
+    this.renderQuestionnaireResults(document.getElementById("r-choice"));
     this.renderExport(document.getElementById("r-export"));
     this.updateLiveBar();
   },
 
+  // Word prompts are now word_prompt-typed questions inside questionnaire
+  // sections. Collect them per section for the prompt picker.
+  wordPromptSections() {
+    return this.config.sections
+      .filter((s) => s.type === "questionnaire")
+      .map((s) => ({ sec: s, prompts: (s.questions || []).filter((q) => q.type === "word_prompt") }))
+      .filter((e) => e.prompts.length);
+  },
+
   renderWordResults(host) {
-    const wordSecs = this.config.sections.filter((s) => s.type === "word_association");
-    const total = wordSecs.reduce((n, s) => n + (s.prompts || []).length, 0);
+    const wordSecs = this.wordPromptSections();
+    const total = wordSecs.reduce((n, e) => n + e.prompts.length, 0);
     const card = document.createElement("div"); card.className = "card";
     if (!total) { card.innerHTML = "<h2>Word clouds</h2><div class='muted'>No word prompts.</div>"; host.appendChild(card); return; }
     const fields = this.config.participant_fields || [];
-    // One <optgroup> per word section (only when there's more than one) so the
-    // host can tell the activities apart in the prompt picker.
-    const promptOpts = wordSecs.map((sec) => {
-      const opts = (sec.prompts || []).map((p) => `<option value="${esc(p.id)}">${esc(p.text || p.id)}</option>`).join("");
+    // One <optgroup> per questionnaire section (only when there's more than one)
+    // so the host can tell the activities apart in the prompt picker.
+    const promptOpts = wordSecs.map((e) => {
+      const opts = e.prompts.map((p) => `<option value="${esc(p.id)}">${esc(p.prompt || p.id)}</option>`).join("");
       if (!opts) return "";
-      return wordSecs.length > 1 ? `<optgroup label="${esc(sec.label || labelFor(sec))}">${opts}</optgroup>` : opts;
+      return wordSecs.length > 1 ? `<optgroup label="${esc(labelFor(e.sec))}">${opts}</optgroup>` : opts;
     }).join("");
     card.innerHTML = `<h2>Word clouds</h2>
       <div class="res-controls">
@@ -713,35 +663,58 @@ const Control = {
     host.innerHTML = `<div class="card"><h2>Likert — mean rating (1–${points})</h2>${blocks}</div>`;
   },
 
-  // Live poll bars for the choice section: per question, a bar per option
-  // showing share of responses, leading option highlighted. Session-scoped.
-  renderChoiceResults(host) {
+  // Normalise a stored choice answer to a list of selected option indices.
+  // Handles multiple_choice (choice_idxs array, or RTDB's object form when read
+  // back) and single_choice (choice_idx). Used by results and export.
+  selectedIdxs(rec) {
+    if (Array.isArray(rec.choice_idxs)) return rec.choice_idxs.filter((x) => typeof x === "number");
+    if (rec.choice_idxs && typeof rec.choice_idxs === "object") return Object.values(rec.choice_idxs).filter((x) => typeof x === "number");
+    if (typeof rec.choice_idx === "number") return [rec.choice_idx];
+    return [];
+  },
+
+  // Live poll bars for questionnaire choice questions (single_choice &
+  // multiple_choice) across every questionnaire section. Each bar shows the
+  // share of respondents who picked that option (multi doesn't sum to 100%, so
+  // the denominator is respondents, not picks), with the leading option
+  // highlighted. Verbatim "Other" free-text answers are listed beneath.
+  // word_prompt questions are shown in the Word clouds card, not here.
+  renderQuestionnaireResults(host) {
     if (!host) return;
-    const sec = this.config.sections.find((s) => s.type === "choice");
-    const questions = (sec && sec.questions) || [];
-    if (!sec || !questions.length) { host.innerHTML = ""; return; }
+    const questions = [];
+    this.config.sections.filter((s) => s.type === "questionnaire").forEach((s) =>
+      (s.questions || []).forEach((q) => {
+        if (q.type === "single_choice" || q.type === "multiple_choice") questions.push(q);
+      })
+    );
+    if (!questions.length) { host.innerHTML = ""; return; }
 
-    const tally = {};
-    questions.forEach((q) => { tally[q.id] = new Array((q.choices || []).length).fill(0); });
+    const pById = this.state.participantsRaw || {};
+    const who = (uid) => (pById[uid] && pById[uid].participant_no) || uid.slice(-5);
+
     const data = this.results.choices || {};
-    Object.keys(data).forEach((uid) => {
-      const byQ = data[uid] || {};
-      Object.keys(byQ).forEach((qid) => {
-        const rec = byQ[qid];
-        if (!this.sessOK(rec) || !tally[qid]) return;
-        const i = rec.choice_idx;
-        if (typeof i === "number" && i >= 0 && i < tally[qid].length) tally[qid][i]++;
-      });
-    });
-
     const blocks = questions.map((q) => {
-      const counts = tally[q.id];
-      const total = counts.reduce((a, b) => a + b, 0);
+      const C = (q.choices || []).length;
+      const slots = C + (q.has_other ? 1 : 0);   // "Other" slot lives at index C
+      const counts = new Array(slots).fill(0);
+      let respondents = 0;
+      const others = [];
+      Object.keys(data).forEach((uid) => {
+        const rec = (data[uid] || {})[q.id];
+        if (!rec || !this.sessOK(rec)) return;
+        respondents++;
+        this.selectedIdxs(rec).forEach((i) => { if (i >= 0 && i < slots) counts[i]++; });
+        const ot = (rec.other_text || "").trim();
+        if (ot) others.push({ who: who(uid), text: ot });
+      });
+
       const max = Math.max(0, ...counts);
-      const bars = (q.choices || []).map((text, i) => {
+      const labels = (q.choices || []).slice();
+      if (q.has_other) labels.push("Other");
+      const bars = labels.map((text, i) => {
         const c = counts[i];
-        const pct = total ? Math.round((c / total) * 100) : 0;
-        const lead = total > 0 && c === max && c > 0;
+        const pct = respondents ? Math.round((c / respondents) * 100) : 0;
+        const lead = respondents > 0 && c === max && c > 0;
         return `<div class="poll-opt ${lead ? "poll-opt--lead" : ""}">
             <div class="poll-opt__text">${ConfigLoader.fmtInline(text)}</div>
             <div class="poll-opt__bar">
@@ -750,176 +723,77 @@ const Control = {
             </div>
           </div>`;
       }).join("");
-      return `<div class="poll-q"><div class="poll-q__prompt">${ConfigLoader.fmtInline(q.prompt)}</div>${bars}
-          <div class="poll-q__total muted">${total} response${total === 1 ? "" : "s"}</div></div>`;
-    }).join("");
-
-    host.innerHTML = `<div class="card"><h2>Choice results (live)</h2>${blocks}</div>`;
-  },
-
-  // Live per-participant pairwise telemetry (NOT the BT ranking — this is flow
-  // position: who's warming up / voting / done, how many votes, what lap/group).
-  // Lap is shown only in loop mode (otherwise always 1); current group only in
-  // grouped mode (in shuffled mode consecutive pairs jump groups, so "current
-  // group" is meaningless and would mislead). Session-scoped via viewSession.
-  renderPairwiseProgress(host) {
-    if (!host) return;
-    const sections = this.config.sections || [];
-    const pwIdx = sections.findIndex((s) => s.type === "pairwise");
-    const sec = pwIdx >= 0 ? sections[pwIdx] : null;
-    if (!sec) { host.innerHTML = ""; return; }
-    const loop = !!sec.loop;
-    const grouped = sec.sequence_mode === "grouped";
-
-    // Per-uid vote tally + most-recent row (for current group in grouped mode).
-    const tally = {}, latest = {};
-    (this.live.comparisons || []).forEach((c) => {
-      if (!this.sessOK(c)) return;
-      tally[c.uid] = (tally[c.uid] || 0) + 1;
-      if (!latest[c.uid] || (c.ts || 0) >= (latest[c.uid].ts || 0)) latest[c.uid] = c;
-    });
-
-    const praw = this.state.participantsRaw || {};
-    let voting = 0, warmup = 0, doneN = 0, notYet = 0;
-    const rows = [];
-    Object.keys(praw).forEach((uid) => {
-      const p = praw[uid] || {};
-      if (!this.sessOK(p)) return;
-      const secIdx = (p.progress && typeof p.progress.section_idx === "number") ? p.progress.section_idx : 0;
-      if (secIdx < pwIdx) { notYet++; return; }            // hasn't reached pairwise — count only
-      const votes = tally[uid] || 0;
-      const lap = (p.pw_plan && p.pw_plan.lap) || 1;
-      let phase, pill;
-      if (secIdx > pwIdx)               { phase = "done";    pill = "pill--open"; doneN++; }
-      else if (votes > 0 || p.pw_plan)  { phase = "voting";  pill = "pill--on";   voting++; }
-      else                              { phase = "warm-up"; pill = "pill--off";  warmup++; }
-      const grp = grouped && latest[uid] ? (latest[uid].group || "") : "";
-      const meta = [String(votes) + (votes === 1 ? " vote" : " votes"),
-                    loop ? `lap ${lap}` : "", grouped && grp ? esc(grp) : ""].filter(Boolean).join(" · ");
-      rows.push(`<div class="monitor__row">
-          <span><code>${esc(uid.slice(-5))}</code> <span class="pill ${pill}">${phase}</span></span>
-          <span class="monitor__count">${meta}</span>
-        </div>`);
-    });
-
-    const summary = [voting && `${voting} voting`, warmup && `${warmup} warm-up`,
-                     doneN && `${doneN} done`, notYet && `${notYet} not yet reached`]
-      .filter(Boolean).join(" · ") || "no participants in this session";
-    host.innerHTML = `<div class="card"><h2>Pairwise progress (live)</h2>` +
-      (rows.length ? rows.join("") : `<div class="muted">No participants have reached the pairwise section yet.</div>`) +
-      `<div class="monitor__total">${summary}</div></div>`;
-  },
-
-  // One pairwise-ranking card with a group selector. BT is fit PER GROUP only:
-  // there are no cross-group comparisons, so a pooled fit would be over a
-  // disconnected graph and is not identifiable — hence no "all groups" option.
-  // The shell (heading + <select> + body div) is built once and only the body
-  // is refilled on the 3s live tick, so a host mid-selection doesn't have the
-  // native dropdown yanked shut underneath them.
-  renderBtCard(host) {
-    if (!host) return;
-    const sec = this.config.sections.find((s) => s.type === "pairwise");
-    const groups = (sec && sec.groups) || [];
-    if (!sec || !groups.length) {
-      host.innerHTML = `<div class="card"><h2>Pairwise ranking</h2><div class='muted'>No pairwise section configured.</div></div>`;
-      return;
-    }
-    // Keep btGroup pinned to a real group across session switches / first paint.
-    this.btGroup = (this.btGroup && groups.includes(this.btGroup)) ? this.btGroup : groups[0];
-
-    const items = sec.items || [];
-    const labelMap = {}; items.forEach((i) => { labelMap[i.id] = i.label || i.id; });
-
-    // Build the shell once (select survives live refreshes; only #bt-body repaints).
-    if (!host.querySelector("#bt-group")) {
-      const opts = groups.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join("");
-      host.innerHTML = `<div class="card"><h2>Pairwise ranking</h2>
-        <div class="res-controls"><label>Group <select id="bt-group">${opts}</select></label></div>
-        <div id="bt-body"></div></div>`;
-      const sel = host.querySelector("#bt-group");
-      sel.value = this.btGroup;
-      sel.addEventListener("change", (e) => { this.btGroup = e.target.value; this.fillBtBody(host, labelMap); });
-    } else {
-      // Groups are study-wide (not session-scoped) so the option list is stable;
-      // just keep the visible selection in sync with btGroup.
-      const sel = host.querySelector("#bt-group");
-      if (sel.value !== this.btGroup) sel.value = this.btGroup;
-    }
-    this.fillBtBody(host, labelMap);
-  },
-
-  fillBtBody(host, labelMap) {
-    const body = host.querySelector("#bt-body");
-    if (!body) return;
-    const sec = this.config.sections.find((s) => s.type === "pairwise");
-    const groupItemIds = (sec.items || []).filter((i) => i.group === this.btGroup).map((i) => i.id);
-    const rows = (this.live.comparisons || []).filter((c) => this.sessOK(c) && c.group === this.btGroup);
-    if (!rows.length) {
-      body.innerHTML = `<div class='muted'>No comparisons for "${esc(this.btGroup)}" in this session yet.</div>`;
-      return;
-    }
-    const wl = rows.filter((r) => r.winner).map((r) => [r.winner, r.winner === r.item_a ? r.item_b : r.item_a]);
-    const fit = btFit(wl, groupItemIds);
-    const conn = connectivity(wl, groupItemIds);
-    const pb = positionBias(rows);
-    const maxAbs = Math.max(0.001, ...fit.map((f) => Math.abs(f.strength || 0)));
-    const bars = fit.filter((f) => !isNaN(f.strength)).map((f, i) => {
-      const pos = f.strength >= 0;
-      const w = (Math.abs(f.strength) / maxAbs) * 48;
-      return `<div class="btrow">
-          <div class="btrow__label">${i + 1}. ${esc(labelMap[f.item] || f.item)}</div>
-          <div class="btrow__track"><div class="btrow__bar" style="${pos ? "left:50%" : "right:50%"};width:${w}%;background:${pos ? "var(--color-accent)" : "#b04a4a"}"></div></div>
-          <div class="btrow__val">${f.strength.toFixed(2)} <span class="muted">· ${f.n} · ${(f.winRate * 100).toFixed(0)}%</span></div>
+      const otherList = others.length
+        ? `<div class="poll-q__others"><div class="poll-q__others-h muted">Other (${others.length}):</div>` +
+          others.map((o) => `<div class="poll-other"><code>${esc(o.who)}</code> ${esc(o.text)}</div>`).join("") +
+          `</div>`
+        : "";
+      const kind = q.type === "multiple_choice" ? "select all that apply" : "single choice";
+      return `<div class="poll-q">
+          <div class="poll-q__prompt">${ConfigLoader.fmtInline(q.prompt)} <span class="muted">(${esc(kind)})</span></div>
+          ${bars}${otherList}
+          <div class="poll-q__total muted">${respondents} respondent${respondents === 1 ? "" : "s"}</div>
         </div>`;
     }).join("");
-    body.innerHTML = `
-        <div class="res-diag">
-          <span><strong>${rows.length}</strong> comparisons</span>
-          <span>graph: <strong class="${conn.components === 1 ? "ok" : "bad"}">${conn.components} component${conn.components === 1 ? "" : "s"}</strong></span>
-          <span>left-win: <strong>${(pb.leftRate * 100).toFixed(0)}%</strong> (p=${pb.p.toFixed(2)})</span>
-        </div>
-        ${conn.components > 1 ? `<div class="res-warn">Graph disconnected — rankings not comparable across components. Isolated: ${esc(conn.isolated.join(", ") || "none")}</div>` : ""}
-        <div class="btchart">${bars}</div>`;
+
+    host.innerHTML = `<div class="card"><h2>Questionnaire results (live)</h2>${blocks}</div>`;
   },
 
   renderExport(host) {
     const pById = this.state.participantsRaw;
     const fieldIds = (this.config.participant_fields || []).map((f) => f.id);
     const dims = (this.config.likert.dimensions || []).map((d) => d.id);
+    const pno = (uid) => (pById[uid] || {}).participant_no || "";
 
     const participants = Object.keys(pById).map((uid) => {
-      const p = pById[uid] || {}; const row = { uid, session: p.session, section_idx: (p.progress || {}).section_idx, created_at: p.created_at };
+      const p = pById[uid] || {};
+      const row = { uid, participant_no: p.participant_no || "", session: p.session,
+                    section_idx: (p.progress || {}).section_idx, created_at: p.created_at, fields_ts: p.fields_ts };
       fieldIds.forEach((f) => { row[f] = (p.fields || {})[f]; }); return row;
     }).filter((r) => this.sessOK(r));
 
     const words = [];
     Object.keys(this.results.words || {}).forEach((uid) => Object.keys(this.results.words[uid] || {}).forEach((pid) => {
       const rec = this.results.words[uid][pid]; if (!this.sessOK(rec)) return;
-      (rec.words || []).forEach((w) => words.push({ uid, prompt_id: pid, word: w, session: rec.session }));
+      (rec.words || []).forEach((w) => words.push({ uid, participant_no: pno(uid), prompt_id: pid, word: w, session: rec.session, ts: rec.ts }));
     }));
 
     const assess = [];
     Object.keys(this.results.assess || {}).forEach((uid) => Object.keys(this.results.assess[uid] || {}).forEach((sid) => {
       const rec = this.results.assess[uid][sid]; if (!this.sessOK(rec)) return;
-      const row = { uid, stimulus_id: sid, session: rec.session }; dims.forEach((d) => { row[d] = rec[d]; }); assess.push(row);
+      const row = { uid, participant_no: pno(uid), stimulus_id: sid, session: rec.session, ts: rec.ts };
+      dims.forEach((d) => { row[d] = rec[d]; }); assess.push(row);
     }));
 
-    const choiceSec = this.config.sections.find((s) => s.type === "choice");
-    const qChoices = {}; ((choiceSec && choiceSec.questions) || []).forEach((q) => { qChoices[q.id] = q.choices || []; });
+    // Questionnaire choice questions across all questionnaire sections.
+    const qMeta = {};
+    this.config.sections.filter((s) => s.type === "questionnaire").forEach((s) =>
+      (s.questions || []).forEach((q) => { if (q.type === "single_choice" || q.type === "multiple_choice") qMeta[q.id] = q; })
+    );
+    // One row per selected option (tidy long format, like word_responses). The
+    // "Other" slot (index === choices.length) exports as choice_text "Other"
+    // with the free text in other_text.
     const choices = [];
     Object.keys(this.results.choices || {}).forEach((uid) => Object.keys(this.results.choices[uid] || {}).forEach((qid) => {
       const rec = this.results.choices[uid][qid]; if (!this.sessOK(rec)) return;
-      choices.push({ uid, question_id: qid, choice_idx: rec.choice_idx, choice_text: ConfigLoader.stripMarkup((qChoices[qid] || [])[rec.choice_idx] || ""), session: rec.session });
+      const q = qMeta[qid] || {}; const opts = q.choices || []; const C = opts.length;
+      const type = rec.type || (Array.isArray(rec.choice_idxs) ? "multiple_choice" : "single_choice");
+      const other = (rec.other_text || "").trim();
+      const idxs = this.selectedIdxs(rec);
+      idxs.forEach((i) => {
+        const isOther = q.has_other && i === C;
+        choices.push({ uid, participant_no: pno(uid), question_id: qid, type,
+          choice_idx: i, choice_text: isOther ? "Other" : ConfigLoader.stripMarkup(opts[i] || ""),
+          other_text: isOther ? other : "", session: rec.session, ts: rec.ts });
+      });
     }));
 
-    const comps = () => (this.live.comparisons || []).filter((r) => this.sessOK(r));
     const tag = (this.viewSession === "(all)" || this.viewSession === "(none set)") ? "all" : this.viewSession;
     const sets = [
-      ["participants", participants, ["uid", "session", "section_idx", "created_at", ...fieldIds]],
-      ["word_responses", words, ["uid", "prompt_id", "word", "session"]],
-      ["assessments", assess, ["uid", "stimulus_id", ...dims, "session"]],
-      ["choices", choices, ["uid", "question_id", "choice_idx", "choice_text", "session"]],
-      ["comparisons", comps(), ["id", "uid", "group", "lap", "item_a", "item_b", "winner", "shown_left", "shown_right", "session", "ts"]]
+      ["participants", participants, ["uid", "participant_no", "session", "section_idx", "created_at", "fields_ts", ...fieldIds]],
+      ["word_responses", words, ["uid", "participant_no", "prompt_id", "word", "session", "ts"]],
+      ["assessments", assess, ["uid", "participant_no", "stimulus_id", ...dims, "session", "ts"]],
+      ["choices", choices, ["uid", "participant_no", "question_id", "type", "choice_idx", "choice_text", "other_text", "session", "ts"]]
     ];
     host.innerHTML = `<div class="card"><h2>Export (CSV)</h2><p class="hint">This session only. For SQLite .db and the full pipeline, use the Python dashboard.</p><div id="exp-btns" class="res-controls"></div></div>`;
     const btns = host.querySelector("#exp-btns");

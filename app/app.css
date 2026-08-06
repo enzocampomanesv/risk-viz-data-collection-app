@@ -96,6 +96,12 @@ h2.title { font-family: var(--font-display); font-size: 1.3rem; font-weight: 600
   border: solid var(--color-accent-contrast); border-width: 0 2.5px 2.5px 0;
   transform: rotate(45deg);
 }
+/* Multiple-choice: square indicator instead of the single-choice circle. */
+.options--multi .option__check { border-radius: 6px; }
+
+/* "Other" free-text box, revealed when the Other option is selected. */
+.other-wrap { margin-top: 0.6rem; }
+.other-wrap[hidden] { display: none; }
 
 /* ---- Inline highlights for study-authored [[name:…]] text ---- */
 .hl { font-weight: inherit; }
@@ -215,9 +221,6 @@ h2.title { font-family: var(--font-display); font-size: 1.3rem; font-weight: 600
 /* Optional word-prompt image */
 .prompt-img { width: 100%; height: auto; border-radius: 8px; margin: 0 0 1rem; border: 1.5px solid var(--color-border); }
 
-/* ---- Wide container (landscape pairwise) ---- */
-.screen--wide { max-width: 960px; }
-
 /* ---- Waiting (gate) screen ---- */
 .waiting { text-align: center; padding-top: 2rem; }
 .spinner {
@@ -226,29 +229,6 @@ h2.title { font-family: var(--font-display); font-size: 1.3rem; font-weight: 600
   border-radius: 50%; animation: spin 0.9s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-
-/* ---- Rotate prompt ---- */
-.rotate { text-align: center; padding-top: 2.5rem; }
-.rotate__icon { font-size: 3rem; color: var(--color-accent); animation: rock 1.6s ease-in-out infinite; }
-@keyframes rock { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(-90deg); } }
-
-/* ---- Pairwise comparison ---- */
-.pw-top { text-align: center; margin-bottom: 0.6rem; }
-.pw-progress { font-size: 0.78rem; color: var(--color-muted); letter-spacing: 0.02em; }
-.pw-question { font-family: var(--font-display); font-weight: 600; font-size: 1.15rem; margin-top: 0.25rem; }
-.pw-board { display: flex; gap: 0.75rem; align-items: stretch; }
-.pw-card {
-  flex: 1 1 0; display: flex; align-items: center; justify-content: center;
-  min-height: 46vh; padding: 0.5rem; overflow: hidden;
-  background: var(--color-surface); border: 2px solid var(--color-border);
-  border-radius: var(--radius); cursor: pointer; font: inherit; color: var(--color-text);
-  transition: border-color 0.12s ease, background 0.12s ease;
-}
-.pw-card--selected { border-color: var(--color-accent); background: var(--color-selected-fill); }
-.pw-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; }
-.pw-img-missing { color: var(--color-muted); font-weight: 600; padding: 1rem; text-align: center; }
-.pw-text { font-size: 1.15rem; line-height: 1.45; padding: 1rem; text-align: center; }
-.pw-actions { margin-top: 0.75rem; }
 
 /* ---- Facilitator broadcast (full-screen blocking modal) ---- */
 .broadcast {

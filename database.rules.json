@@ -9,19 +9,14 @@
         ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
         ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
         ".validate": "newData.hasChildren(['created_at'])",
-        "created_at": { ".validate": "newData.isNumber()" },
-        "session":    { ".validate": "newData.isString()" },
-        "fields":     { ".validate": "newData.hasChildren()" },
-        "consent":    { ".validate": "newData.hasChildren(['version','ts'])" },
-        "progress":   { ".validate": true },
-        "pw_plan": {
-          ".validate": "newData.hasChildren(['seed','idx','lap'])",
-          "seed":   { ".validate": "newData.isNumber()" },
-          "idx":    { ".validate": "newData.isNumber()" },
-          "lap":    { ".validate": "newData.isNumber()" },
-          "$other": { ".validate": false }
-        },
-        "$other":     { ".validate": false }
+        "created_at":     { ".validate": "newData.isNumber()" },
+        "session":        { ".validate": "newData.isString()" },
+        "participant_no": { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "fields":         { ".validate": "newData.hasChildren()" },
+        "fields_ts":      { ".validate": "newData.isNumber()" },
+        "consent":        { ".validate": "newData.hasChildren(['version','ts'])" },
+        "progress":       { ".validate": true },
+        "$other":         { ".validate": false }
       }
     },
 
@@ -67,8 +62,14 @@
         ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
         ".write": "auth != null && ($uid === auth.uid || auth.token.admin === true)",
         "$qid": {
-          ".validate": "newData.hasChildren(['choice_idx','session','ts'])",
+          ".validate": "newData.hasChildren(['type','session','ts']) && (newData.hasChild('choice_idx') || newData.hasChild('choice_idxs'))",
+          "type":       { ".validate": "newData.val() === 'single_choice' || newData.val() === 'multiple_choice'" },
           "choice_idx": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "choice_idxs": {
+            ".validate": "newData.hasChildren()",
+            "$i": { ".validate": "newData.isNumber() && newData.val() >= 0" }
+          },
+          "other_text": { ".validate": "newData.isString() && newData.val().length <= 500" },
           "session":    { ".validate": "newData.isString()" },
           "ts":         { ".validate": "newData.isNumber()" },
           "$other":     { ".validate": false }
@@ -76,22 +77,11 @@
       }
     },
 
-    "comparisons": {
-      ".read": "auth != null && auth.token.admin === true",
-      "$push": {
-        ".write": "auth != null && !data.exists() && newData.child('uid').val() === auth.uid",
-        ".validate": "newData.hasChildren(['uid','group','lap','item_a','item_b','winner','shown_left','shown_right','ts'])",
-        "uid":        { ".validate": "newData.val() === auth.uid" },
-        "group":      { ".validate": "newData.isString()" },
-        "lap":        { ".validate": "newData.isNumber()" },
-        "item_a":     { ".validate": "newData.isString()" },
-        "item_b":     { ".validate": "newData.isString()" },
-        "winner":     { ".validate": "newData.val() === newData.parent().child('item_a').val() || newData.val() === newData.parent().child('item_b').val()" },
-        "shown_left": { ".validate": "newData.isString()" },
-        "shown_right":{ ".validate": "newData.isString()" },
-        "session":    { ".validate": "newData.isString()" },
-        "ts":         { ".validate": "newData.isNumber()" },
-        "$other":     { ".validate": false }
+    "participant_seq": {
+      "$session": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        ".validate": "newData.isNumber() && newData.val() >= 0"
       }
     },
 
@@ -101,8 +91,7 @@
       "session":        { ".validate": "newData.isString()" },
       "gating_enabled": { ".validate": "newData.isBoolean()" },
       "presentation_idx": { ".validate": "newData.isNumber()" },
-      "back_pairwise":   { ".validate": "newData.isBoolean()" },
-      "back_choice":     { ".validate": "newData.isBoolean()" },
+      "back_questionnaire": { ".validate": "newData.isBoolean()" },
       "back_end":        { ".validate": "newData.isBoolean()" },
       "section_gates":  { "$section_id": { ".validate": "newData.isString()" } },
       "broadcast": {

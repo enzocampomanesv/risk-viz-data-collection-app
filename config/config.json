@@ -34,9 +34,6 @@
       }
     ]
   },
-  "comparison": {
-    "folder": "images/visual_v1"
-  },
   "sections": [
     {
       "id": "consent",
@@ -52,9 +49,10 @@
     },
     {
       "id": "words",
-      "type": "word_association",
+      "type": "questionnaire",
       "orientation": "portrait",
-      "gate": true
+      "gate": true,
+      "label": "Current flood information"
     },
     {
       "id": "discussion",
@@ -69,24 +67,11 @@
       "gate": true
     },
     {
-      "id": "pairwise",
-      "type": "pairwise",
-      "orientation": "landscape",
-      "rotate_prompt": true,
-      "gate": true
-    },
-    {
       "id": "words_future",
-      "type": "word_association",
+      "type": "questionnaire",
       "orientation": "portrait",
       "gate": true,
       "label": "Future / ideal flood information"
-    },
-    {
-      "id": "choice",
-      "type": "choice",
-      "orientation": "portrait",
-      "gate": true
     }
   ]
 }

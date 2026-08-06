@@ -10,11 +10,6 @@ function escapeHTML(s) {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
-function indexBy(arr, key) {
-  const m = {};
-  arr.forEach((o) => { m[o[key]] = o; });
-  return m;
-}
 function mdLite(src) {
   const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const inline = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
@@ -42,15 +37,12 @@ const App = {
     theme: null,
     session: null,            // current workshop/session id (from control/session)
     gatingEnabled: false,     // master gate switch (control/gating_enabled overrides config)
-    backFlags: { pairwise: false, choice: false, end: false },
+    backFlags: { questionnaire: false, end: false },
     participant: {},          // mirror of participants/{uid}
     sectionIndex: 0,          // index into config.sections
     reg: { step: 0, answers: {} },  // registration sub-state
-    wa: { step: 0, answers: {} },   // word-association sub-state
+    q: { step: 0, answers: {} },    // questionnaire sub-state (one question per step)
     lk: { step: 0, answers: {} },   // likert sub-state
-    ch: { step: 0, answers: {} },   // choice sub-state
-    ch: { step: 0, answers: {} },   // choice sub-state
-    pw: null,                 // pairwise sub-state (per active pairwise section)
     gateRef: null             // active gate listener, if waiting
   },
 
@@ -98,7 +90,7 @@ const App = {
       // Live facilitator broadcast (boot value is baselined, not replayed).
       this.watchBroadcast();
 
-      // Host-controlled Back-button visibility (pairwise / choice / end).
+      // Host-controlled Back-button visibility (questionnaire / end).
       this.watchBackFlags();
 
       // Host "move everyone to section X now" override.
@@ -161,8 +153,42 @@ const App = {
     if (!this.state.participant.created_at) this.state.participant.created_at = Date.now();
   },
 
+  // RTDB keys can't contain . # $ / [ ]. Session names are free text (host-typed),
+  // so sanitise before using one as the counter key. The readable participant_no
+  // still uses the raw session string, so it stays exactly as the host named it.
+  seqKey(session) { return String(session).replace(/[.#$/\[\]]/g, "_"); },
+
+  // Assign a readable, per-workshop sequential id (e.g. "accra-001") exactly once.
+  // The real Firebase uid stays the record key (and the security anchor); this is
+  // just a friendly label stored alongside it. A transaction on the shared counter
+  // keeps numbers unique even when many phones consent in the same instant. The
+  // guard makes a page refresh (which re-runs consent only if not yet consented)
+  // never claim a second number.
+  async assignParticipantNumber() {
+    if (this.state.participant.participant_no) return this.state.participant.participant_no;
+    const session = this.state.session;
+    let n;
+    try {
+      const res = await this.db.ref(`participant_seq/${this.seqKey(session)}`)
+        .transaction((cur) => (cur || 0) + 1);
+      if (!res.committed) return null;
+      n = res.snapshot.val();
+    } catch (e) {
+      // Non-fatal: the uid still identifies the participant. Don't block the flow.
+      console.error("participant_seq transaction failed", e);
+      return null;
+    }
+    const pno = `${session}-${String(n).padStart(3, "0")}`;
+    await this.db.ref(`participants/${this.state.uid}`).update({ participant_no: pno });
+    this.state.participant.participant_no = pno;
+    return pno;
+  },
+
   async writeRegistration(answers) {
-    await this.db.ref(`participants/${this.state.uid}`).update({ fields: answers });
+    await this.db.ref(`participants/${this.state.uid}`).update({
+      fields: answers,
+      fields_ts: firebase.database.ServerValue.TIMESTAMP
+    });
     this.state.participant.fields = answers;
   },
 
@@ -180,7 +206,6 @@ const App = {
 
   render() {
     this.detachGate();
-    this.detachOrient();
     this.detachPres();
     const cfg = this.state.config;
     const section = cfg.sections[this.state.sectionIndex];
@@ -190,20 +215,16 @@ const App = {
     return this.renderSection(section);
   },
 
-  isPortrait() { return window.innerHeight > window.innerWidth; },
-  detachOrient() {
-    if (this._orientHandler) { window.removeEventListener("resize", this._orientHandler); this._orientHandler = null; }
-  },
   detachPres() {
     if (this._presRef) { this._presRef.off("value", this._presHandler); this._presRef = null; this._presHandler = null; }
   },
 
-  // Host-controlled visibility of the Back button on the three "late" screens
-  // (pairwise, choice, end) where it isn't on by default. Listened once at
-  // boot so toggles from the control room take effect live, mid-session.
+  // Host-controlled visibility of the Back button on the "late" screens
+  // (questionnaire, end) where it isn't on by default. Listened once at boot so
+  // toggles from the control room take effect live, mid-session.
   watchBackFlags() {
-    this.state.backFlags = this.state.backFlags || { pairwise: false, choice: false, end: false };
-    ["pairwise", "choice", "end"].forEach((key) => {
+    this.state.backFlags = this.state.backFlags || { questionnaire: false, end: false };
+    ["questionnaire", "end"].forEach((key) => {
       this.db.ref(`control/back_${key}`).on("value", (s) => {
         this.state.backFlags[key] = s.val() === true;
         // Repaint only if we're currently showing the screen this flag affects,
@@ -231,9 +252,7 @@ const App = {
 
   // Host force-move: when the facilitator picks a section and hits "Move
   // everyone here", every connected participant in the session jumps to it.
-  // This is the ONLY thing that can interrupt a participant mid-pairwise-loop
-  // (renderPairwiseComparison otherwise re-checks nothing after entry). It is
-  // event-driven and independent of whatever screen is currently rendered.
+  // Event-driven and independent of whatever screen is currently rendered.
   //
   // Semantics:
   //  - The value present at boot is recorded as a baseline and NOT acted on, so
@@ -241,8 +260,8 @@ const App = {
   //    rather than being teleported by a standing force.
   //  - Only acts on a strictly newer ts (one-shot), matching this session, with
   //    a section_id that resolves to a real section.
-  //  - Preserves already-persisted sub-state (pw_plan, votes, registration); it
-  //    only moves the section pointer, mirroring prevSection's teardown.
+  //  - Preserves already-persisted answers; it only moves the section pointer,
+  //    then re-seeds the target section's sub-state (mirroring prevSection).
   watchForceSection() {
     let baselineSet = false;
     this.db.ref("control/force_section").on("value", (snap) => {
@@ -255,7 +274,6 @@ const App = {
       this._forceSeenTs = ts;
       const idx = this.state.config.sections.findIndex((s) => s.id === v.section_id);
       if (idx < 0) return;                                   // unknown section id — ignore
-      this.state.pw = null;                                  // clean teardown of any pairwise loop
       this.setProgress(idx)
         .then(() => { this.seedSubState(this.state.config.sections[idx]); this.render(); })
         .catch((e) => this.renderError(e.message));
@@ -279,79 +297,182 @@ const App = {
 
   renderSection(section) {
     switch (section.type) {
-      case "consent":          return this.renderConsent(section);
-      case "registration":     return this.renderRegistration(section);
-      case "word_association": return this.renderWordAssociation(section);
-      case "likert":           return this.renderLikert(section);
-      case "pairwise":         return this.enterPairwise(section);
-      case "choice":           return this.renderChoice(section);
-      default:                 return this.renderError(`Unknown section type: ${section.type}`);
+      case "consent":       return this.renderConsent(section);
+      case "registration":  return this.renderRegistration(section);
+      case "questionnaire": return this.renderQuestionnaire(section);
+      case "likert":        return this.renderLikert(section);
+      default:              return this.renderError(`Unknown section type: ${section.type}`);
     }
   },
 
-  // Temporary stub (replaced in Stage 4) so the full flow is walkable now.
-  async writeChoice(qId, choiceIdx) {
-    await this.db.ref(`choices/${this.state.uid}/${qId}`).set({
-      choice_idx: choiceIdx,
-      session: this.state.session,
-      ts: firebase.database.ServerValue.TIMESTAMP
-    });
-  },
-
-  // Single-select multiple-choice questions, one per step. Mirrors the likert
-  // flow: answers held in memory this session (a refresh restarts at q1 but
-  // already-written answers persist), section advances only after the last
-  // question. Intra-question Back is always allowed; the step-0 cross-section
-  // Back honours the host's back_choice flag.
-  renderChoice(section) {
-    const ch = this.state.ch;
+  /* ===================== questionnaire =====================
+     One question per step, dispatched by question type. Answers are held in
+     memory for the session (a refresh restarts at the first question of the
+     section but already-written answers persist in Firebase), and the section
+     advances only after the last question. Intra-section Back is always
+     available; the step-0 cross-section Back honours the host's
+     back_questionnaire flag. Supports single_choice, multiple_choice (each with
+     an optional free-text "Other"), and word_prompt. */
+  renderQuestionnaire(section) {
+    const q = this.state.q;
     const questions = section.questions || [];
     if (!questions.length) { this.setProgress(this.state.sectionIndex + 1).then(() => this.render()); return; }
-    if (ch.step >= questions.length) ch.step = questions.length - 1;
-    const q = questions[ch.step];
-    const canCrossBack = this.state.backFlags.choice;
-    const showBack = ch.step > 0 || (canCrossBack && this.state.sectionIndex > 0);
-    let selected = (q.id in ch.answers) ? ch.answers[q.id] : null;
+    if (q.step >= questions.length) q.step = questions.length - 1;
+    const question = questions[q.step];
+    switch (question.type) {
+      case "word_prompt":     return this.renderWordQuestion(section, question);
+      case "single_choice":   return this.renderChoiceQuestion(section, question, false);
+      case "multiple_choice": return this.renderChoiceQuestion(section, question, true);
+      default:                return this.renderError(`Unknown question type: ${question.type}`);
+    }
+  },
 
-    const options = (q.choices || []).map((text, i) =>
-      `<button class="option ${selected === i ? "option--selected" : ""}" type="button" data-idx="${i}"
-          aria-label="${escapeHTML(ConfigLoader.stripMarkup(text))}">
-          <span>${ConfigLoader.fmtInline(text)}</span><span class="option__check"></span></button>`
-    ).join("");
+  // Shared navigation for questionnaire questions.
+  qShowBack() {
+    return this.state.q.step > 0 || (this.state.backFlags.questionnaire && this.state.sectionIndex > 0);
+  },
+  qBack(section) {
+    const q = this.state.q;
+    if (q.step > 0) { q.step--; this.renderQuestionnaire(section); }
+    else this.prevSection();
+  },
+  async qNext(section) {
+    const q = this.state.q;
+    const questions = section.questions || [];
+    if (q.step + 1 < questions.length) { q.step++; this.renderQuestionnaire(section); }
+    else { await this.setProgress(this.state.sectionIndex + 1); this.render(); }
+  },
+
+  // single_choice (radio) and multiple_choice (checkbox). When has_other is set,
+  // an "Other" option is appended at index === choices.length; selecting it
+  // reveals a free-text box whose value must be non-empty to continue.
+  renderChoiceQuestion(section, question, isMulti) {
+    const q = this.state.q;
+    const choices = question.choices || [];
+    const hasOther = !!question.has_other;
+    const otherIdx = choices.length;   // the "Other" slot, if present
+
+    if (!q.answers[question.id]) {
+      q.answers[question.id] = isMulti ? { idxs: [], other: "" } : { idx: null, other: "" };
+    }
+    const ans = q.answers[question.id];
+    const isSelected = (i) => isMulti ? ans.idxs.includes(i) : ans.idx === i;
+    const otherOn = () => isMulti ? ans.idxs.includes(otherIdx) : ans.idx === otherIdx;
+
+    const optionRow = (label, i) => {
+      const rawLabel = ConfigLoader.stripMarkup(label);
+      return `<button class="option ${isSelected(i) ? "option--selected" : ""}" type="button" data-idx="${i}"
+          role="${isMulti ? "checkbox" : "radio"}" aria-checked="${isSelected(i)}"
+          aria-label="${escapeHTML(rawLabel)}">
+          <span>${ConfigLoader.fmtInline(label)}</span><span class="option__check"></span></button>`;
+    };
+    let optionsHTML = choices.map((text, i) => optionRow(text, i)).join("");
+    if (hasOther) optionsHTML += optionRow("Other", otherIdx);
 
     this.mount(`
-      <h2 class="title">${ConfigLoader.fmtInline(q.prompt)}</h2>
-      <div class="options" role="radiogroup" aria-label="${escapeHTML(ConfigLoader.stripMarkup(q.prompt))}">${options}</div>
+      <h2 class="title">${ConfigLoader.fmtInline(question.prompt)}</h2>
+      ${question.image ? `<img class="prompt-img" src="${escapeHTML(question.image)}" alt="" />` : ""}
+      <div class="options ${isMulti ? "options--multi" : ""}"
+           role="${isMulti ? "group" : "radiogroup"}"
+           aria-label="${escapeHTML(ConfigLoader.stripMarkup(question.prompt))}">${optionsHTML}</div>
+      <div id="q-other-wrap" class="other-wrap" ${otherOn() ? "" : "hidden"}>
+        <input id="q-other" class="text-input" type="text" autocomplete="off"
+               placeholder="Please specify" value="${escapeHTML(ans.other || "")}"
+               aria-label="Please specify your other answer" />
+      </div>
       <div class="actions">
-        ${showBack ? `<button id="ch-back" class="btn btn--ghost">Back</button>` : ""}
-        <button id="ch-next" class="btn btn--primary" disabled>Continue</button>
+        ${this.qShowBack() ? `<button id="q-back" class="btn btn--ghost">Back</button>` : ""}
+        <button id="q-next" class="btn btn--primary" disabled>Continue</button>
       </div>
     `);
 
-    const nextBtn = document.getElementById("ch-next");
-    const refreshNext = () => { nextBtn.disabled = selected === null; };
+    const nextBtn = document.getElementById("q-next");
+    const otherWrap = document.getElementById("q-other-wrap");
+    const otherInput = document.getElementById("q-other");
+
+    const valid = () => {
+      if (isMulti) {
+        if (ans.idxs.length === 0) return false;
+        if (ans.idxs.includes(otherIdx) && (ans.other || "").trim() === "") return false;
+        return true;
+      }
+      if (ans.idx === null) return false;
+      if (ans.idx === otherIdx && (ans.other || "").trim() === "") return false;
+      return true;
+    };
+    const syncOther = (focusIfShown) => {
+      const show = otherOn();
+      otherWrap.hidden = !show;
+      if (show && focusIfShown) otherInput.focus();
+    };
+    const refreshNext = () => { nextBtn.disabled = !valid(); };
+
     this.el().querySelectorAll(".option").forEach((b) =>
       b.addEventListener("click", () => {
-        selected = +b.dataset.idx;
-        ch.answers[q.id] = selected;
-        this.el().querySelectorAll(".option").forEach((x) => x.classList.toggle("option--selected", +x.dataset.idx === selected));
+        const i = +b.dataset.idx;
+        let turnedOtherOn = false;
+        if (isMulti) {
+          const at = ans.idxs.indexOf(i);
+          if (at >= 0) ans.idxs.splice(at, 1); else ans.idxs.push(i);
+          const on = ans.idxs.includes(i);
+          b.classList.toggle("option--selected", on);
+          b.setAttribute("aria-checked", String(on));
+          turnedOtherOn = i === otherIdx && on;
+        } else {
+          const wasOther = ans.idx === otherIdx;
+          ans.idx = i;
+          this.el().querySelectorAll(".option").forEach((x) => {
+            const on = +x.dataset.idx === i;
+            x.classList.toggle("option--selected", on);
+            x.setAttribute("aria-checked", String(on));
+          });
+          turnedOtherOn = i === otherIdx && !wasOther;
+        }
+        // Only pull focus into the text box when "Other" itself was just
+        // selected — not when the user ticks some other checkbox while Other
+        // happens to remain checked.
+        syncOther(turnedOtherOn);
         refreshNext();
       })
     );
-    const back = document.getElementById("ch-back");
-    if (back) back.addEventListener("click", () => {
-      if (ch.step > 0) { ch.step--; this.renderChoice(section); }
-      else this.prevSection();
-    });
+    if (otherInput) otherInput.addEventListener("input", () => { ans.other = otherInput.value; refreshNext(); });
+
+    const back = document.getElementById("q-back");
+    if (back) back.addEventListener("click", () => this.qBack(section));
     nextBtn.addEventListener("click", async () => {
-      if (selected === null) return;
+      if (!valid()) return;
       nextBtn.disabled = true;
-      try { await this.writeChoice(q.id, selected); }
-      catch (e) { return this.renderError(e.message); }
-      if (ch.step + 1 < questions.length) { ch.step++; this.renderChoice(section); }
-      else { await this.setProgress(this.state.sectionIndex + 1); this.render(); }
+      try {
+        if (isMulti) await this.writeMultipleChoice(question, ans);
+        else await this.writeSingleChoice(question, ans);
+      } catch (e) { return this.renderError(e.message); }
+      this.qNext(section);
     });
     refreshNext();
+  },
+
+  async writeSingleChoice(question, ans) {
+    const otherIdx = (question.choices || []).length;
+    const rec = {
+      type: "single_choice",
+      choice_idx: ans.idx,
+      session: this.state.session,
+      ts: firebase.database.ServerValue.TIMESTAMP
+    };
+    if (question.has_other && ans.idx === otherIdx) rec.other_text = (ans.other || "").trim();
+    await this.db.ref(`choices/${this.state.uid}/${question.id}`).set(rec);
+  },
+
+  async writeMultipleChoice(question, ans) {
+    const otherIdx = (question.choices || []).length;
+    const rec = {
+      type: "multiple_choice",
+      choice_idxs: ans.idxs.slice().sort((a, b) => a - b),
+      session: this.state.session,
+      ts: firebase.database.ServerValue.TIMESTAMP
+    };
+    if (question.has_other && ans.idxs.includes(otherIdx)) rec.other_text = (ans.other || "").trim();
+    await this.db.ref(`choices/${this.state.uid}/${question.id}`).set(rec);
   },
 
   /* ----- discussion: host-synced display. Host navigates prompts; opening the
@@ -438,14 +559,10 @@ const App = {
     if (section.type === "registration") {
       this.state.reg.answers = Object.assign({}, this.state.participant.fields || {});
       this.state.reg.step = this.state.config.participant_fields.length; // land on confirm
-    } else if (section.type === "word_association") {
-      this.state.wa.step = 0;  // answers retained in memory this session
+    } else if (section.type === "questionnaire") {
+      this.state.q.step = 0;   // answers retained in memory this session
     } else if (section.type === "likert") {
       this.state.lk.step = 0;
-    } else if (section.type === "choice") {
-      this.state.ch.step = 0;  // answers retained in memory this session
-    } else if (section.type === "choice") {
-      this.state.ch.step = 0;  // answers retained in memory this session
     }
   },
 
@@ -464,9 +581,9 @@ const App = {
     return `<div class="footer-logos">${items}</div>`;
   },
 
-  mount(bodyHTML, { withProgress = true, withFooter = true, wide = false } = {}) {
+  mount(bodyHTML, { withProgress = true, withFooter = true } = {}) {
     this.el().innerHTML =
-      `<div class="screen ${wide ? "screen--wide" : ""}">
+      `<div class="screen">
          ${withProgress ? this.progressBar() : ""}
          <div class="screen__body">${bodyHTML}</div>
        </div>
@@ -501,6 +618,7 @@ const App = {
     btn.addEventListener("click", async () => {
       btn.disabled = true;
       await this.writeConsent(c.version);
+      await this.assignParticipantNumber();
       await this.setProgress(this.state.sectionIndex + 1);
       this.state.reg = { step: 0, answers: {} };
       this.render();
@@ -607,7 +725,7 @@ const App = {
     });
   },
 
-  /* ----- word association: chip input, one prompt per screen ----- */
+  /* ----- word_prompt question: chip input, one question per step ----- */
   async writeWords(promptId, words) {
     await this.db.ref(`word_responses/${this.state.uid}/${promptId}`).set({
       words: words.slice(),
@@ -616,18 +734,16 @@ const App = {
     });
   },
 
-  renderWordAssociation(section) {
-    const wa = this.state.wa;
-    const prompts = section.prompts || [];
-    const prompt = prompts[wa.step];
-    const maxW = prompt.max_words || 5;
-    const minW = prompt.min_words || 1;
-    if (!wa.answers[prompt.id]) wa.answers[prompt.id] = [];
-    const words = wa.answers[prompt.id];
+  renderWordQuestion(section, question) {
+    const q = this.state.q;
+    const maxW = question.max_words || 5;
+    const minW = question.min_words || 1;
+    if (!q.answers[question.id]) q.answers[question.id] = [];
+    const words = q.answers[question.id];
 
     this.mount(`
-      <div class="question">${escapeHTML(prompt.text)}</div>
-      ${prompt.image ? `<img class="prompt-img" src="${escapeHTML(prompt.image)}" alt="" />` : ""}
+      <div class="question">${ConfigLoader.fmtInline(question.prompt)}</div>
+      ${question.image ? `<img class="prompt-img" src="${escapeHTML(question.image)}" alt="" />` : ""}
       <div class="chip-input">
         <input id="wa-input" type="text" inputmode="text" autocomplete="off"
                autocapitalize="none" spellcheck="false" placeholder="Type a word" aria-label="Type a word" />
@@ -636,8 +752,8 @@ const App = {
       <div id="wa-counter" class="muted chip-counter"></div>
       <div id="wa-chips" class="chips" aria-live="polite"></div>
       <div class="actions">
-        ${(wa.step > 0 || this.state.sectionIndex > 0) ? `<button id="wa-back" class="btn btn--ghost">Back</button>` : ""}
-        <button id="wa-next" class="btn btn--primary">Continue</button>
+        ${this.qShowBack() ? `<button id="q-back" class="btn btn--ghost">Back</button>` : ""}
+        <button id="q-next" class="btn btn--primary">Continue</button>
       </div>
     `);
 
@@ -645,8 +761,8 @@ const App = {
     const addBtn = document.getElementById("wa-add");
     const chipsEl = document.getElementById("wa-chips");
     const counterEl = document.getElementById("wa-counter");
-    const nextBtn = document.getElementById("wa-next");
-    const backBtn = document.getElementById("wa-back");
+    const nextBtn = document.getElementById("q-next");
+    const backBtn = document.getElementById("q-back");
 
     const refresh = () => {
       chipsEl.innerHTML = words.map((w, i) =>
@@ -671,16 +787,12 @@ const App = {
 
     addBtn.addEventListener("click", add);
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } });
-    if (backBtn) backBtn.addEventListener("click", () => {
-      if (wa.step > 0) { wa.step--; this.renderWordAssociation(section); }
-      else this.prevSection();
-    });
+    if (backBtn) backBtn.addEventListener("click", () => this.qBack(section));
     nextBtn.addEventListener("click", async () => {
       if (words.length < minW) return;
       nextBtn.disabled = true;
-      await this.writeWords(prompt.id, words);
-      if (wa.step + 1 < prompts.length) { wa.step++; this.renderWordAssociation(section); }
-      else { await this.setProgress(this.state.sectionIndex + 1); this.render(); }
+      await this.writeWords(question.id, words);
+      this.qNext(section);
     });
 
     refresh();
@@ -767,203 +879,6 @@ const App = {
       else { await this.setProgress(this.state.sectionIndex + 1); this.render(); }
     });
     refreshNext();
-  },
-
-  /* ----- pairwise: merged image/text cards, within-group pairing, prep
-     warm-up, grouped/shuffled sequencing, optional looping laps. The actual
-     pair selection/ordering/resume logic lives in pairplan.js (pure,
-     unit-tested); this just drives the UI and persists {seed, idx, lap}. ----- */
-  async enterPairwise(section) {
-    // Already active for this section (e.g. after a vote re-render) — reuse.
-    if (this.state.pw && this.state.pw.sectionId === section.id) return this.renderPairwiseFrame();
-
-    const items = section.items || [];
-    const settings = {
-      pairwise_sequence_mode: section.sequence_mode,
-      pairwise_loop: section.loop,
-      comparisons_per_group: section.comparisons_per_group,
-      prep_comparisons: section.prep_comparisons,
-    };
-
-    this.renderBoot("Preparing…");
-    const planRef = this.db.ref(`participants/${this.state.uid}/pw_plan`);
-    let rec;
-    try {
-      const snap = await this.withTimeout(planRef.once("value"), 8000, "Plan read");
-      rec = snap.val();
-    } catch (e) { return this.renderError(e.message); }
-    // No pw_plan record yet means no real vote has ever been cast for this
-    // participant — NOT "first page load", since the seed itself is a pure
-    // function of (uid, session) and needs no reservation write. We only
-    // persist pw_plan once idx/lap actually advance (see the vote handler
-    // below), so "record exists" is an unambiguous signal that real voting
-    // has started — which is exactly what decides whether prep runs again.
-    const seed = PairPlan.hashSeed(`${this.state.uid}:${this.state.session}`);
-    const hasRealProgress = !!rec;
-    rec = rec || { seed, idx: 0, lap: 1 };
-
-    const plan = PairPlan.buildPlan(items, settings, rec.seed);
-    this.state.pw = {
-      sectionId: section.id, folder: section.folder || "",
-      itemsById: indexBy(items, "id"),
-      plan, idx: rec.idx, lap: rec.lap || 1,
-      prompt: section.prompt || "Which option do you prefer?",
-      // Prep runs only when no real vote has ever been recorded. It is never
-      // persisted itself, so a refresh DURING prep correctly restarts it
-      // (no pw_plan exists yet either way) — but once the first real vote
-      // exists, prep must never be forced again on a later resume.
-      prepIdx: 0, inPrep: !hasRealProgress && plan.prepPairs.length > 0,
-    };
-    this.renderPairwiseFrame();
-  },
-
-  // Decide rotate-prompt vs comparison based on orientation; re-evaluate on resize.
-  renderPairwiseFrame() {
-    this.detachOrient();
-    const section = this.state.config.sections[this.state.sectionIndex];
-    const needsRotate = () => section.orientation === "landscape" && section.rotate_prompt && this.isPortrait();
-    const evaluate = () => { needsRotate() ? this.renderRotatePrompt() : this.renderPairwiseComparison(); };
-    this._orientHandler = evaluate;
-    window.addEventListener("resize", evaluate);
-    evaluate();
-  },
-
-  renderRotatePrompt() {
-    this.mount(`
-      <div class="rotate">
-        <div class="rotate__icon" aria-hidden="true">⟲</div>
-        <h2 class="title">Please turn your phone sideways</h2>
-        <p class="lead muted">This part works best in landscape. Rotate your phone to continue.</p>
-      </div>
-    `, { withProgress: false, withFooter: false });
-  },
-
-  pairCard(item) {
-    const pw = this.state.pw;
-    if (item && item.file) {
-      const src = (pw.folder ? pw.folder + "/" : "") + item.file;
-      return `<img class="pw-img" src="${escapeHTML(src)}" alt="${escapeHTML(item.label || "")}"
-                onerror="this.outerHTML='<div class=&quot;pw-img-missing&quot;>${escapeHTML(item.label || item.id)}</div>'">`;
-    }
-    return `<div class="pw-text">${escapeHTML((item && (item.text || item.label)) || "")}</div>`;
-  },
-
-  renderPairwiseComparison() {
-    const pw = this.state.pw;
-    if (!pw) return; // stale call (e.g. a resize event after this.finishPairwise() already ran) — nothing to render
-    const canBack = this.state.backFlags.pairwise;
-
-    // ---- prep (warm-up) phase: never persisted, never written ----
-    if (pw.inPrep) {
-      const prepPairs = pw.plan.prepPairs;
-      if (pw.prepIdx >= prepPairs.length) { pw.inPrep = false; return this.renderPairwiseComparison(); }
-      const pair = prepPairs[pw.prepIdx];
-      const [leftKey, rightKey] = PairPlan.drawSide(pw.plan, 0, pw.prepIdx);
-      const L = pw.itemsById[pair[leftKey]] || { id: pair[leftKey] };
-      const R = pw.itemsById[pair[rightKey]] || { id: pair[rightKey] };
-      this.mount(`
-        <div class="pw-top">
-          <div class="pw-progress">Warm-up</div>
-          <div class="pw-question">${escapeHTML(pw.prompt)}</div>
-        </div>
-        <div class="pw-board">
-          <button class="pw-card" data-side="left" type="button">${this.pairCard(L)}</button>
-          <button class="pw-card" data-side="right" type="button">${this.pairCard(R)}</button>
-        </div>
-        <div class="actions pw-actions">
-          ${canBack && pw.prepIdx === 0 ? `<button id="pw-back" class="btn btn--ghost">Back</button>` : ""}
-          <button id="pw-next" class="btn btn--primary" disabled>Choose</button>
-        </div>
-      `, { withProgress: false, withFooter: false, wide: true });
-      this.wirePairwiseCard(() => { pw.prepIdx += 1; this.renderPairwiseComparison(); });
-      const back = document.getElementById("pw-back");
-      if (back) back.addEventListener("click", () => { this.detachOrient(); this.prevSection(); });
-      return;
-    }
-
-    // ---- real (recorded) comparisons ----
-    const cur = PairPlan.currentPair(pw.plan, pw.idx, pw.lap);
-    if (!cur) { this.detachOrient(); return this.finishPairwise(); }
-
-    const pair = cur.pair;
-    const [leftKey, rightKey] = PairPlan.drawSide(pw.plan, cur.lap, cur.idx);
-    const L = pw.itemsById[pair[leftKey]] || { id: pair[leftKey] };
-    const R = pw.itemsById[pair[rightKey]] || { id: pair[rightKey] };
-
-    this.mount(`
-      <div class="pw-top">
-        <div class="pw-question">${escapeHTML(pw.prompt)}</div>
-      </div>
-      <div class="pw-board">
-        <button class="pw-card" data-side="left" type="button">${this.pairCard(L)}</button>
-        <button class="pw-card" data-side="right" type="button">${this.pairCard(R)}</button>
-      </div>
-      <div class="actions pw-actions">
-        ${canBack ? `<button id="pw-back" class="btn btn--ghost">Back</button>` : ""}
-        <button id="pw-next" class="btn btn--primary" disabled>Choose</button>
-      </div>
-    `, { withProgress: false, withFooter: false, wide: true });
-
-    this.wirePairwiseCard(async (side) => {
-      const winner = side === "left" ? pair[leftKey] : pair[rightKey];
-      try {
-        await this.writeComparison({
-          group: pair.group, lap: cur.lap,
-          item_a: pair.item_a, item_b: pair.item_b, winner,
-          shown_left: pair[leftKey], shown_right: pair[rightKey],
-        });
-        // Advance idx within the current lap; currentPair() handles lap rollover
-        // (loop mode) on the NEXT render, so we only ever persist a simple
-        // monotonic idx here — rollover bookkeeping is pairplan.js's job, not ours.
-        pw.idx = cur.idx + 1;
-        pw.lap = cur.lap;
-        const rolled = PairPlan.currentPair(pw.plan, pw.idx, pw.lap);
-        if (rolled && rolled.lap !== cur.lap) { pw.idx = rolled.idx; pw.lap = rolled.lap; }
-        await this.db.ref(`participants/${this.state.uid}/pw_plan`).set({ seed: pw.plan.seed, idx: pw.idx, lap: pw.lap });
-      } catch (e) { return this.renderError(e.message); }
-      this.renderPairwiseComparison();
-    });
-    const back = document.getElementById("pw-back");
-    // Back leaves pw_plan's {idx, lap} exactly as persisted above — resuming
-    // pairwise later picks up at the same spot rather than restarting.
-    if (back) back.addEventListener("click", () => { this.detachOrient(); this.prevSection(); });
-  },
-
-  // Shared click-to-select-then-Choose wiring for both prep and real cards.
-  // onChoose receives the selected side ("left"/"right"); prep ignores it.
-  wirePairwiseCard(onChoose) {
-    let selected = null;
-    const nextBtn = document.getElementById("pw-next");
-    this.el().querySelectorAll(".pw-card").forEach((c) =>
-      c.addEventListener("click", () => {
-        selected = c.dataset.side;
-        this.el().querySelectorAll(".pw-card").forEach((x) => x.classList.toggle("pw-card--selected", x === c));
-        nextBtn.disabled = false;
-      })
-    );
-    nextBtn.addEventListener("click", () => {
-      if (!selected) return;
-      nextBtn.disabled = true;
-      onChoose(selected);
-    });
-  },
-
-  async writeComparison(c) {
-    await this.db.ref("comparisons").push({
-      uid: this.state.uid,
-      group: c.group, lap: c.lap,
-      item_a: c.item_a, item_b: c.item_b, winner: c.winner,
-      shown_left: c.shown_left, shown_right: c.shown_right,
-      session: this.state.session,
-      ts: firebase.database.ServerValue.TIMESTAMP
-    });
-  },
-
-  async finishPairwise() {
-    this.detachOrient();
-    this.state.pw = null;
-    await this.setProgress(this.state.sectionIndex + 1);
-    this.render();
   },
 
   renderComplete() {

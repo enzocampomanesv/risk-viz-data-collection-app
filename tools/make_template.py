@@ -22,16 +22,13 @@ TABS = OrderedDict([
                           "widths": [26, 18, 56]}),
     ("registration",     {"cols": ["field_id", "label", "type", "required", "option_value", "option_text"],
                           "widths": [16, 40, 14, 10, 18, 24]}),
-    ("word_prompts",     {"cols": ["id", "section", "text", "image", "max_words", "min_words"],
-                          "widths": [10, 16, 52, 26, 12, 12]}),
+    ("questions",        {"cols": ["id", "section", "type", "prompt", "image",
+                                   "max_words", "min_words", "has_other", "choice_text"],
+                          "widths": [10, 16, 16, 46, 24, 11, 11, 10, 40]}),
     ("discussion",       {"cols": ["id", "text", "image"],
                           "widths": [10, 64, 28]}),
     ("likert_stimuli",   {"cols": ["id", "title", "body", "image"],
                           "widths": [10, 24, 60, 26]}),
-    ("comparison_items", {"cols": ["id", "label", "file", "text", "group"],
-                          "widths": [10, 26, 20, 50, 16]}),
-    ("choice_questions", {"cols": ["id", "prompt", "choice_1", "choice_2", "choice_3", "choice_4"],
-                          "widths": [10, 44, 22, 22, 22, 22]}),
 ])
 
 NOTES = [
@@ -41,23 +38,26 @@ NOTES = [
     ["   python tools/build_content.py     (publishes your changes to the app)"],
     [""],
     ["Rules that matter:"],
-    ["- 'id' / 'field_id' / question 'id': short and unique WITHIN its tab (wp1, st1, c01, q1). Don't reuse."],
-    ["- Leave optional cells blank (e.g. 'image', or 'file' when an item is text-only)."],
+    ["- 'id' / 'field_id' / question 'id': short and unique WITHIN its tab (q1, st1, d1). Don't reuse."],
+    ["- Leave optional cells blank (e.g. 'image', or 'max_words' on a choice question)."],
     ["- Do not rename tabs or the header row (row 1)."],
     [""],
     ["settings:        key/value study-wide options. See the 'notes' column on each row."],
     ["registration:    one row PER OPTION. Repeat field_id down the rows; label/type/required taken"],
     ["                 from the field's first row. type = single-choice | text | number."],
     ["                 (text/number need no option rows; only single-choice uses option_value/text.)"],
-    ["word_prompts:    'section' = which word_association section this prompt belongs to (a section id"],
-    ["                 from config.json, e.g. words / words_future). Blank = the first word section."],
+    ["questions:       the participant questionnaire. One row PER CHOICE (like registration)."],
+    ["                 Repeat the same 'id' down the rows; the FIRST row carries type/prompt/image/"],
+    ["                 has_other/max_words/min_words, later rows fill only 'choice_text'."],
+    ["                 type = single_choice | multiple_choice | word_prompt."],
+    ["                 - single_choice / multiple_choice: give 2+ 'choice_text' rows. Set has_other=yes"],
+    ["                   to append an 'Other' option with a free-text box (works for both types)."],
+    ["                 - word_prompt: one row, no choices. Uses max_words / min_words (open word entry)."],
+    ["                 'section' = which questionnaire section this question belongs to (a section id"],
+    ["                 from config.json, e.g. questionnaire). Blank = the first questionnaire section."],
+    ["                 Rich text in prompt/choices: **bold**. Questions appear in row order."],
     ["discussion:      host-led display shown to everyone (text and/or image). No participant input."],
-    ["comparison_items: the pairwise items. Give a 'file' (image in images/visual_v1) OR 'text'."],
-    ["                 'group' restricts pairing: items are only ever compared WITHIN the same group."],
-    ["                 Put warm-up items in group 'preparation' (shown first, never saved)."],
-    ["choice_questions: post-pairwise. 'prompt' + up to 4 choices (leave extra choice cells blank)."],
-    ["                 Rich text in prompt/choices: **bold** and [[name:words]] for colour"],
-    ["                 (name = red | green | blue | amber | teal). Combine: [[red:**high chance**]]."],
+    ["likert_stimuli:  one row per stimulus shown in the Likert section (title + body and/or image)."],
 ]
 
 
@@ -90,12 +90,6 @@ def build_workbook(rows_by_tab, path):
 EXAMPLE_ROWS = {
     "settings": [
         {"key": "likert_points", "value": 3, "notes": "Number of points on the Likert scale (e.g. 3 or 5)."},
-        {"key": "pairwise_sequence_mode", "value": "grouped", "notes": "grouped = all of one group's pairs, then the next | shuffled = mix groups."},
-        {"key": "pairwise_loop", "value": "no", "notes": "shuffled only: yes = keep looping (reshuffled laps) until host releases."},
-        {"key": "comparisons_per_group", "value": 0, "notes": "Max comparisons per group (0 = all possible pairs)."},
-        {"key": "prep_comparisons", "value": 0, "notes": "Warm-up comparisons from the 'preparation' group (0 = all)."},
-        {"key": "pairwise_landscape", "value": "yes", "notes": "yes = require landscape (rotate prompt) for the comparison task."},
-        {"key": "pairwise_prompt", "value": "Which option do you prefer?", "notes": "Question shown above each comparison."},
     ],
     "registration": [
         {"field_id": "age_range", "label": "What is your age range?", "type": "single-choice", "required": "yes", "option_value": "15-29", "option_text": "15-29"},
@@ -103,9 +97,22 @@ EXAMPLE_ROWS = {
         {"field_id": "gender", "label": "What is your gender?", "type": "single-choice", "required": "yes", "option_value": "female", "option_text": "Female"},
         {"field_id": "gender", "option_value": "male", "option_text": "Male"},
     ],
-    "word_prompts": [
-        {"id": "wp1", "section": "words", "text": "When you hear 'flood warning', what words come to mind?", "max_words": 5, "min_words": 1},
-        {"id": "wpf1", "section": "words_future", "text": "In an ideal future, how would you want to receive flood information?", "max_words": 5, "min_words": 1},
+    "questions": [
+        # word_prompt: one row, open word entry.
+        {"id": "q1", "section": "words", "type": "word_prompt",
+         "prompt": "When you hear 'flood warning', what words come to mind?", "max_words": 5, "min_words": 1},
+        # single_choice: first row carries prompt/type; each choice is its own row.
+        {"id": "q2", "section": "words", "type": "single_choice",
+         "prompt": "Which channel do you trust most for flood warnings?", "has_other": "yes",
+         "choice_text": "Radio"},
+        {"id": "q2", "choice_text": "SMS"},
+        {"id": "q2", "choice_text": "Community leader"},
+        # multiple_choice: pick any number; has_other adds a free-text 'Other'.
+        {"id": "q3", "section": "words", "type": "multiple_choice",
+         "prompt": "Which of these have you used before?", "has_other": "yes",
+         "choice_text": "Flood map"},
+        {"id": "q3", "choice_text": "Evacuation notice"},
+        {"id": "q3", "choice_text": "Neighbour's warning"},
     ],
     "discussion": [
         {"id": "d1", "text": "How does your community currently hear about floods?"},
@@ -113,16 +120,6 @@ EXAMPLE_ROWS = {
     ],
     "likert_stimuli": [
         {"id": "st1", "title": "SMS text alert", "body": "FLOOD ALERT: Heavy rain expected tonight. Move to higher ground."},
-    ],
-    "comparison_items": [
-        {"id": "c01", "label": "Hazard map", "file": "c01.jpg", "group": "visual"},
-        {"id": "c02", "label": "Plain SMS", "text": "Flood likely tonight. Move valuables up.", "group": "wording"},
-        {"id": "p01", "label": "Warm-up A", "text": "A short example message.", "group": "preparation"},
-        {"id": "p02", "label": "Warm-up B", "text": "Another example message.", "group": "preparation"},
-    ],
-    "choice_questions": [
-        {"id": "q1", "prompt": "Which option was easiest to understand?",
-         "choice_1": "The map", "choice_2": "The SMS", "choice_3": "The radio notice", "choice_4": "None of them"},
     ],
 }
 

@@ -7,9 +7,12 @@
 const ConfigLoader = (function () {
 
   const VALID_SECTION_TYPES = [
-    "consent", "registration", "word_association",
-    "discussion", "likert", "pairwise", "choice"
+    "consent", "registration", "questionnaire",
+    "discussion", "likert"
   ];
+
+  // Question types allowed inside a questionnaire section.
+  const VALID_QUESTION_TYPES = ["single_choice", "multiple_choice", "word_prompt"];
 
   // ---- inline rich text (study-authored) -------------------------------------
   // Authored in the xlsx and carried verbatim through content.json. Two rules,
@@ -60,31 +63,40 @@ const ConfigLoader = (function () {
     cfg.likert.points = pts;
     cfg.likert.anchors = anchorsFor(pts);
 
-    // First word_association section id — used as the home for any word prompt
-    // that doesn't carry a `section` (legacy content.json, or blank cell).
-    const firstWordSec = (cfg.sections.find((s) => s.type === "word_association") || {}).id;
+    // First questionnaire section id — the home for any question that doesn't
+    // carry a `section` (blank cell in the Excel `questions` tab).
+    const firstQSec = (cfg.sections.find((s) => s.type === "questionnaire") || {}).id;
 
     cfg.sections.forEach((sec) => {
-      if (sec.type === "word_association" && Array.isArray(content.word_prompts)) {
-        sec.prompts = content.word_prompts.filter((p) => (p.section || firstWordSec) === sec.id);
+      if (sec.type === "questionnaire" && Array.isArray(content.questions)) {
+        sec.questions = content.questions.filter((q) => (q.section || firstQSec) === sec.id);
       }
       if (sec.type === "discussion" && Array.isArray(content.discussion_prompts)) sec.prompts = content.discussion_prompts;
       if (sec.type === "likert" && Array.isArray(content.likert_stimuli)) sec.stimuli = content.likert_stimuli;
-      if (sec.type === "choice" && Array.isArray(content.choice_questions)) sec.questions = content.choice_questions;
-      if (sec.type === "pairwise" && Array.isArray(content.comparison_items)) {
-        sec.items = content.comparison_items;
-        sec.groups = content._comparison_groups || [];
-        sec.folder = (cfg.comparison || {}).folder || "images/visual_v1";
-        sec.prompt = settings.pairwise_prompt || "Which option do you prefer?";
-        sec.sequence_mode = settings.pairwise_sequence_mode || "grouped";
-        sec.loop = !!settings.pairwise_loop;
-        sec.comparisons_per_group = settings.comparisons_per_group || 0;
-        sec.prep_comparisons = settings.prep_comparisons || 0;
-        const landscape = settings.pairwise_landscape !== false;
-        sec.orientation = landscape ? "landscape" : "portrait";
-        sec.rotate_prompt = landscape;
-      }
     });
+  }
+
+  // Per-question structural check for questionnaire sections. Mirrors the
+  // build_content.py validation so a hand-edited content.json still fails loudly.
+  function validateQuestion(q, where, errors) {
+    if (!q || typeof q !== "object") { errors.push(`${where} is not an object`); return; }
+    if (!q.id) errors.push(`${where} missing "id"`);
+    if (!VALID_QUESTION_TYPES.includes(q.type)) {
+      errors.push(`${where} invalid type "${q.type}" (single_choice | multiple_choice | word_prompt)`);
+      return; // type-specific checks below would be meaningless
+    }
+    if (!q.prompt || String(q.prompt).trim() === "") errors.push(`${where} missing "prompt"`);
+    if (q.type === "single_choice" || q.type === "multiple_choice") {
+      if (!Array.isArray(q.choices) || q.choices.length < 2) {
+        errors.push(`${where} (${q.type}) needs at least 2 choices`);
+      }
+    } else { // word_prompt
+      if (typeof q.max_words !== "number" || typeof q.min_words !== "number") {
+        errors.push(`${where} (word_prompt) needs numeric max_words and min_words`);
+      } else if (q.min_words < 1 || q.max_words < q.min_words) {
+        errors.push(`${where} (word_prompt) requires 1 <= min_words <= max_words`);
+      }
+    }
   }
 
   function validate(cfg) {
@@ -125,25 +137,18 @@ const ConfigLoader = (function () {
         if (s.orientation && !["portrait", "landscape"].includes(s.orientation)) {
           errors.push(`sections[${i}] orientation must be "portrait" or "landscape"`);
         }
-        if (s.type === "word_association" && (!Array.isArray(s.prompts) || s.prompts.length === 0)) {
-          errors.push(`word_association section has no prompts (word_prompts tab)`);
+        if (s.type === "questionnaire") {
+          if (!Array.isArray(s.questions) || s.questions.length === 0) {
+            errors.push(`questionnaire section "${s.id}" has no questions (questions tab)`);
+          } else {
+            s.questions.forEach((q, qi) => validateQuestion(q, `sections[${i}].questions[${qi}]`, errors));
+          }
         }
         if (s.type === "discussion" && (!Array.isArray(s.prompts) || s.prompts.length === 0)) {
           errors.push(`discussion section has no prompts (discussion tab)`);
         }
         if (s.type === "likert" && (!Array.isArray(s.stimuli) || s.stimuli.length === 0)) {
           errors.push(`likert section has no stimuli (likert_stimuli tab)`);
-        }
-        if (s.type === "choice" && (!Array.isArray(s.questions) || s.questions.length === 0)) {
-          errors.push(`choice section has no questions (choice_questions tab)`);
-        }
-        if (s.type === "pairwise") {
-          if (!Array.isArray(s.items) || s.items.length < 2) {
-            errors.push(`pairwise section needs >=2 comparison_items`);
-          }
-          if (!["grouped", "shuffled"].includes(s.sequence_mode)) {
-            errors.push(`pairwise sequence_mode must be "grouped" or "shuffled"`);
-          }
         }
       });
     } else {

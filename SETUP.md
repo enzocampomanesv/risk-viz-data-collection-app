@@ -48,9 +48,10 @@ python set_admin_claim.py host@yourstudy.org
 ```
 (The host must sign out/in once afterward for the claim to apply.)
 
-## 9. Add your comparison images
-- Drop the visual-pairwise images into **`images/visual_v1/`** and list them in
-  `config/config.json → item_sets.visual_v1.items` (`id`, `label`, `file`).
+## 9. Add your prompt images (optional)
+- Any question, discussion prompt, or Likert stimulus can show an image. Drop the
+  files into **`images/prompts/`** and reference them from the Excel `image`
+  column (a bare filename resolves against that folder; a full path is kept as-is).
 - Served free by Firebase Hosting — no Cloud Storage / Blaze needed.
 
 ## 10. Run the foundation check

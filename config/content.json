@@ -1,12 +1,6 @@
 {
   "settings": {
-    "likert_points": 3,
-    "pairwise_sequence_mode": "shuffled",
-    "pairwise_loop": true,
-    "comparisons_per_group": 0,
-    "prep_comparisons": 0,
-    "pairwise_landscape": true,
-    "pairwise_prompt": "Which way of communicating flood risk do you prefer?"
+    "likert_points": 3
   },
   "participant_fields": [
     {
@@ -198,11 +192,12 @@
       ]
     }
   ],
-  "word_prompts": [
+  "questions": [
     {
       "id": "wp1",
       "section": "words",
-      "text": "What flood information do you currently receive?",
+      "type": "word_prompt",
+      "prompt": "What flood information do you currently receive?",
       "image": null,
       "max_words": 10,
       "min_words": 1
@@ -210,7 +205,8 @@
     {
       "id": "wp2",
       "section": "words",
-      "text": "Where does this information usually come from?",
+      "type": "word_prompt",
+      "prompt": "Where does this information usually come from?",
       "image": null,
       "max_words": 10,
       "min_words": 1
@@ -218,7 +214,8 @@
     {
       "id": "wp3",
       "section": "words",
-      "text": "Which sources do you pay attention to or trust more?",
+      "type": "word_prompt",
+      "prompt": "Which sources do you pay attention to or trust more?",
       "image": null,
       "max_words": 10,
       "min_words": 1
@@ -226,7 +223,8 @@
     {
       "id": "wp4",
       "section": "words",
-      "text": "Do you also share flood information with others?",
+      "type": "word_prompt",
+      "prompt": "Do you also share flood information with others?",
       "image": null,
       "max_words": 10,
       "min_words": 1
@@ -234,7 +232,8 @@
     {
       "id": "wp5",
       "section": "words",
-      "text": "How are residents currently involved in producing and sharing flood information?",
+      "type": "word_prompt",
+      "prompt": "How are residents currently involved in producing and sharing flood information?",
       "image": null,
       "max_words": 10,
       "min_words": 1
@@ -242,7 +241,8 @@
     {
       "id": "wpf1",
       "section": "words_future",
-      "text": "How would you like to receive flood information?",
+      "type": "word_prompt",
+      "prompt": "How would you like to receive flood information?",
       "image": null,
       "max_words": 10,
       "min_words": 1
@@ -250,7 +250,8 @@
     {
       "id": "wpf2",
       "section": "words_future",
-      "text": "Through which channels would you prefer to receive flood information?",
+      "type": "word_prompt",
+      "prompt": "Through which channels would you prefer to receive flood information?",
       "image": null,
       "max_words": 10,
       "min_words": 1
@@ -258,7 +259,8 @@
     {
       "id": "wpf3",
       "section": "words_future",
-      "text": "Which format would be most useful?",
+      "type": "word_prompt",
+      "prompt": "Which format would be most useful?",
       "image": null,
       "max_words": 10,
       "min_words": 1
@@ -266,7 +268,8 @@
     {
       "id": "wpf4",
       "section": "words_future",
-      "text": "How would you like to be involved in producing or sharing flood information?",
+      "type": "word_prompt",
+      "prompt": "How would you like to be involved in producing or sharing flood information?",
       "image": null,
       "max_words": 10,
       "min_words": 1
@@ -313,180 +316,6 @@
       "title": "Community radio notice",
       "body": "A spoken radio announcement warning residents of rising water levels over the next 12 hours.",
       "image": "images/prompts/d1.gif"
-    }
-  ],
-  "comparison_items": [
-    {
-      "id": "v01",
-      "label": "flood extent map",
-      "file": "fe_map.jpg",
-      "text": null,
-      "group": "channel"
-    },
-    {
-      "id": "v02",
-      "label": "flood depth map",
-      "file": "fd_map.jpg",
-      "text": null,
-      "group": "channel"
-    },
-    {
-      "id": "v03",
-      "label": "Bldg",
-      "file": "3.png",
-      "text": null,
-      "group": "channel"
-    },
-    {
-      "id": "v04",
-      "label": "Ppl",
-      "file": "4.png",
-      "text": null,
-      "group": "format"
-    },
-    {
-      "id": "v05",
-      "label": "Choose",
-      "file": "5.png",
-      "text": null,
-      "group": "format"
-    },
-    {
-      "id": "v06",
-      "label": "EO",
-      "file": "6.png",
-      "text": null,
-      "group": "format"
-    },
-    {
-      "id": "v07",
-      "label": "Geo",
-      "file": "7.png",
-      "text": null,
-      "group": "LoD"
-    },
-    {
-      "id": "v08",
-      "label": "Flash",
-      "file": "8.jpg",
-      "text": null,
-      "group": "LoD"
-    },
-    {
-      "id": "v09",
-      "label": "sus",
-      "file": "9.gif",
-      "text": null,
-      "group": "LoD"
-    },
-    {
-      "id": "v10",
-      "label": "Hypnotize",
-      "file": "2.jpg",
-      "text": null,
-      "group": "LoD"
-    },
-    {
-      "id": "t01",
-      "label": "Plain SMS",
-      "file": null,
-      "text": "Flood likely tonight. Move valuables up and stay away from the river.",
-      "group": "LoD"
-    },
-    {
-      "id": "t02",
-      "label": "Detailed SMS",
-      "file": null,
-      "text": "Met service forecasts 80mm rain by 9pm; river may rise 1.5m. Evacuate low-lying zones A and B.",
-      "group": "channel"
-    },
-    {
-      "id": "p01",
-      "label": "Warm-up A",
-      "file": "rain.gif",
-      "text": "Heavy rain is expected tonight.",
-      "group": "preparation"
-    },
-    {
-      "id": "p02",
-      "label": "Warm-up B",
-      "file": null,
-      "text": "A storm may cause flooding later today.",
-      "group": "preparation"
-    },
-    {
-      "id": "p03",
-      "label": "Warm-up C",
-      "file": null,
-      "text": "River levels could rise quickly this evening.",
-      "group": "preparation"
-    }
-  ],
-  "_comparison_groups": [
-    "channel",
-    "format",
-    "LoD"
-  ],
-  "choice_questions": [
-    {
-      "id": "q1",
-      "prompt": "Which option was easiest to understand?",
-      "choices": [
-        "This area **may** flood during the next rainfall.",
-        "This area [[blue:**is likely to**]] flood during the next rainfall.",
-        "There is a [[red:high]] chance that this area will flood during the next rainfall.",
-        "We have [[teal:high confidence]] that this area will flood during the next rainfall."
-      ]
-    },
-    {
-      "id": "q2",
-      "prompt": "Which one would make you more likely to prepare after receiving the message?",
-      "choices": [
-        "This area **may** flood during the next rainfall.",
-        "This area [[blue:**is likely to**]] flood during the next rainfall.",
-        "There is a [[red:high]] chance that this area will flood during the next rainfall.",
-        "We have [[teal:high confidence]] that this area will flood during the next rainfall."
-      ]
-    },
-    {
-      "id": "q3",
-      "prompt": "Which one sounds more serious?",
-      "choices": [
-        "This area **may** flood during the next rainfall.",
-        "This area [[blue:**is likely to**]] flood during the next rainfall.",
-        "There is a [[red:high]] chance that this area will flood during the next rainfall.",
-        "We have [[teal:high confidence]] that this area will flood during the next rainfall."
-      ]
-    },
-    {
-      "id": "q4",
-      "prompt": "Which one sounds more certain?",
-      "choices": [
-        "This area **may** flood during the next rainfall.",
-        "This area [[blue:**is likely to**]] flood during the next rainfall.",
-        "There is a [[red:high]] chance that this area will flood during the next rainfall.",
-        "We have [[teal:high confidence]] that this area will flood during the next rainfall."
-      ]
-    },
-    {
-      "id": "q5",
-      "prompt": "Which option do you think sounds like the flood will definitely happen?",
-      "choices": [
-        "There is a high chance that this area will flood during [[blue:**the rainy season**]].",
-        "There is a high chance that this area will flood during [[red:the extreme rainfall event]].",
-        "There is a high chance that this area will flood in [[teal:**1-in-10-year flood**]].",
-        "There is a high chance that this area will flood during **the next rainfall, but exact time is uncertain**."
-      ]
-    },
-    {
-      "id": "q6",
-      "prompt": "Which option sounds the most urgent and triggers your decision to prepare?",
-      "choices": [
-        "There is a high chance that this area will flood during [[blue:**the rainy season**]].",
-        "There is a high chance that this area will flood during [[red:the extreme rainfall event]].",
-        "There is a high chance that this area will flood in [[teal:**1-in-10-year flood**]].",
-        "There is a high chance that this area will flood during **the next rainfall, but exact time is uncertain**."
-      ]
     }
   ]
 }
