@@ -1,0 +1,92 @@
+{
+  "study": {
+    "id": "flood-comm-2026",
+    "title": "Flood Risk Communication Study",
+    "config_version": "1.0",
+    "default_session": "pilot",
+    "rtdb_region_note": "Create the Realtime Database in europe-west1 to match data residency."
+  },
+  "host_gating": {
+    "enabled": false
+  },
+  "consent": {
+    "version": "1.0",
+    "checkbox_label": "I have read and understood the above, and I agree to take part.",
+    "markdown_text": "## Consent to participate\n\nYou are invited to take part in a short workshop activity about how flood risk is communicated in your community.\n\n- Your participation is **voluntary** and you may stop at any time.\n- We collect your answers together with a few background details (age range, gender, community role, education). **We do not collect your name.**\n- Your data is stored securely and used only for research.\n\nIf you agree, tick the box below and continue."
+  },
+  "likert": {
+    "dimensions": [
+      {
+        "id": "comprehension",
+        "label": "How easy is this to understand?"
+      },
+      {
+        "id": "usefulness",
+        "label": "How useful is this for you?"
+      },
+      {
+        "id": "access",
+        "label": "How easy would this be to access?"
+      },
+      {
+        "id": "trust",
+        "label": "How much would you trust this?"
+      }
+    ]
+  },
+  "comparison": {
+    "folder": "images/visual_v1"
+  },
+  "sections": [
+    {
+      "id": "consent",
+      "type": "consent",
+      "orientation": "portrait",
+      "gate": false
+    },
+    {
+      "id": "registration",
+      "type": "registration",
+      "orientation": "portrait",
+      "gate": false
+    },
+    {
+      "id": "words",
+      "type": "word_association",
+      "orientation": "portrait",
+      "gate": true
+    },
+    {
+      "id": "discussion",
+      "type": "discussion",
+      "orientation": "portrait",
+      "gate": true
+    },
+    {
+      "id": "assess",
+      "type": "likert",
+      "orientation": "portrait",
+      "gate": true
+    },
+    {
+      "id": "pairwise",
+      "type": "pairwise",
+      "orientation": "landscape",
+      "rotate_prompt": true,
+      "gate": true
+    },
+    {
+      "id": "words_future",
+      "type": "word_association",
+      "orientation": "portrait",
+      "gate": true,
+      "label": "Future / ideal flood information"
+    },
+    {
+      "id": "choice",
+      "type": "choice",
+      "orientation": "portrait",
+      "gate": true
+    }
+  ]
+}

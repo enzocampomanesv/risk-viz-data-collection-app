@@ -1,0 +1,30 @@
+{
+  "database": {
+    "rules": "database.rules.json"
+  },
+  "hosting": {
+    "site": "s4a-risk-viz",
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "database.rules.json",
+      ".firebaserc",
+      "**/.*",
+      "dashboard/**",
+      "**/node_modules/**",
+      "tools/**",
+      "study_content.xlsx"
+    ],
+    "headers": [
+      {
+        "source": "config/config.json",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "fonts": {
+    "import_url": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
+    "body": "'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+    "display": "'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+    "base_size_px": 18
+  },
+  "colors": {
+    "bg": "#FAFAF8",
+    "surface": "#FFFFFF",
+    "text": "#1A1D21",
+    "muted": "#5B6470",
+    "accent": "#0E7C86",
+    "accent_contrast": "#FFFFFF",
+    "selected_fill": "#E6F4F5",
+    "border": "#E2E5E9",
+    "success": "#137333",
+    "error": "#C5221F"
+  },
+  "sizing": {
+    "radius_px": 12,
+    "max_width_px": 560,
+    "tap_min_px": 54
+  },
+  "logos": [
+    { "name": "Space4All",            "file": "images/logos/space4all.png", "alt": "Space4All project" },
+    { "name": "University of Twente", "file": "images/logos/utwente.png",   "alt": "University of Twente" },
+    { "name": "NWO",                  "file": "images/logos/nwo.png",       "alt": "Dutch Research Council (NWO)" }
+  ]
+}

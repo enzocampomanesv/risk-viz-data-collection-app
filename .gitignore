@@ -1,0 +1,11 @@
+# Never commit the service-account key (full admin access to your project)
+dashboard/serviceAccountKey.json
+dashboard/*.key.json
+
+# Python
+dashboard/__pycache__/
+dashboard/.venv/
+*.pyc
+
+# OS
+.DS_Store

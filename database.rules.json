@@ -1,0 +1,124 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "participants": {
+      ".read": "auth != null && auth.token.admin === true",
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".validate": "newData.hasChildren(['created_at'])",
+        "created_at": { ".validate": "newData.isNumber()" },
+        "session":    { ".validate": "newData.isString()" },
+        "fields":     { ".validate": "newData.hasChildren()" },
+        "consent":    { ".validate": "newData.hasChildren(['version','ts'])" },
+        "progress":   { ".validate": true },
+        "pw_plan": {
+          ".validate": "newData.hasChildren(['seed','idx','lap'])",
+          "seed":   { ".validate": "newData.isNumber()" },
+          "idx":    { ".validate": "newData.isNumber()" },
+          "lap":    { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        },
+        "$other":     { ".validate": false }
+      }
+    },
+
+    "word_responses": {
+      ".read": "auth != null && auth.token.admin === true",
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": "auth != null && ($uid === auth.uid || auth.token.admin === true)",
+        "$prompt_id": {
+          ".validate": "newData.hasChildren(['words','ts'])",
+          "words": {
+            ".validate": "newData.hasChildren()",
+            "$i": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60" }
+          },
+          "session": { ".validate": "newData.isString()" },
+          "ts":      { ".validate": "newData.isNumber()" },
+          "$other":  { ".validate": false }
+        }
+      }
+    },
+
+    "assessments": {
+      ".read": "auth != null && auth.token.admin === true",
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": "auth != null && ($uid === auth.uid || auth.token.admin === true)",
+        "$stim": {
+          ".validate": "newData.hasChildren(['comprehension','usefulness','access','trust','ts'])",
+          "comprehension": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10" },
+          "usefulness":    { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10" },
+          "access":        { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10" },
+          "trust":         { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10" },
+          "session":       { ".validate": "newData.isString()" },
+          "ts":            { ".validate": "newData.isNumber()" },
+          "$other":        { ".validate": false }
+        }
+      }
+    },
+
+    "choices": {
+      ".read": "auth != null && auth.token.admin === true",
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": "auth != null && ($uid === auth.uid || auth.token.admin === true)",
+        "$qid": {
+          ".validate": "newData.hasChildren(['choice_idx','session','ts'])",
+          "choice_idx": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "session":    { ".validate": "newData.isString()" },
+          "ts":         { ".validate": "newData.isNumber()" },
+          "$other":     { ".validate": false }
+        }
+      }
+    },
+
+    "comparisons": {
+      ".read": "auth != null && auth.token.admin === true",
+      "$push": {
+        ".write": "auth != null && !data.exists() && newData.child('uid').val() === auth.uid",
+        ".validate": "newData.hasChildren(['uid','group','lap','item_a','item_b','winner','shown_left','shown_right','ts'])",
+        "uid":        { ".validate": "newData.val() === auth.uid" },
+        "group":      { ".validate": "newData.isString()" },
+        "lap":        { ".validate": "newData.isNumber()" },
+        "item_a":     { ".validate": "newData.isString()" },
+        "item_b":     { ".validate": "newData.isString()" },
+        "winner":     { ".validate": "newData.val() === newData.parent().child('item_a').val() || newData.val() === newData.parent().child('item_b').val()" },
+        "shown_left": { ".validate": "newData.isString()" },
+        "shown_right":{ ".validate": "newData.isString()" },
+        "session":    { ".validate": "newData.isString()" },
+        "ts":         { ".validate": "newData.isNumber()" },
+        "$other":     { ".validate": false }
+      }
+    },
+
+    "control": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true",
+      "session":        { ".validate": "newData.isString()" },
+      "gating_enabled": { ".validate": "newData.isBoolean()" },
+      "presentation_idx": { ".validate": "newData.isNumber()" },
+      "back_pairwise":   { ".validate": "newData.isBoolean()" },
+      "back_choice":     { ".validate": "newData.isBoolean()" },
+      "back_end":        { ".validate": "newData.isBoolean()" },
+      "section_gates":  { "$section_id": { ".validate": "newData.isString()" } },
+      "broadcast": {
+        ".validate": "newData.hasChildren(['text','ts'])",
+        "text":   { ".validate": "newData.isString() && newData.val().length <= 500" },
+        "ts":     { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      },
+      "force_section": {
+        ".validate": "newData.hasChildren(['section_id','session','ts'])",
+        "section_id": { ".validate": "newData.isString()" },
+        "session":    { ".validate": "newData.isString()" },
+        "ts":         { ".validate": "newData.isNumber()" },
+        "$other":     { ".validate": false }
+      },
+      "warnings": { "$other": { ".validate": true } }
+    }
+  }
+}
