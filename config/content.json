@@ -1,321 +1,296 @@
 {
   "settings": {
-    "likert_points": 3
+    "likert_points": 5,
+    "anchor_low": "Not at all",
+    "anchor_mid": "Partially",
+    "anchor_high": "Very much",
+    "notice_completion1_title": "Great work – session one is done!",
+    "notice_completion1_body": "You can leave the app and move on to the group activity. We will reconnect back in the app later.",
+    "notice_welcome_title": "Welcome back!",
+    "notice_welcome_body": "Up next are examples of flood communication formats and channels. Review and score each one. The SPACE4ALL team will later tailor the project outputs based on your preferences. We will begin shortly 😊",
+    "notice_completion2_title": "Well done!",
+    "notice_completion2_body": "We will now move into our last activity of the day, where we will talk about your preferences and identify shared views within the group. Let's go!"
   },
-  "participant_fields": [
+  "questions": [
     {
-      "id": "age_range",
-      "label": "What is your age range?",
-      "type": "select",
-      "required": true,
-      "options": [
-        {
-          "value": "0-14",
-          "text": "0-14"
-        },
-        {
-          "value": "15-29",
-          "text": "15-29"
-        },
-        {
-          "value": "30-44",
-          "text": "30-44"
-        },
-        {
-          "value": "45-59",
-          "text": "45-59"
-        },
-        {
-          "value": "60+",
-          "text": "60+"
-        }
-      ]
+      "id": "age",
+      "section": "profile",
+      "type": "single_choice",
+      "prompt": "What is your age group?",
+      "image": null,
+      "choices": [
+        "18-24 years old",
+        "25-34 years old",
+        "35-44 years old",
+        "45-54 years old",
+        "55-70 years old"
+      ],
+      "has_other": false,
+      "profile": true
     },
     {
       "id": "gender",
-      "label": "What is your gender?",
-      "type": "select",
-      "required": true,
-      "options": [
-        {
-          "value": "female",
-          "text": "Female"
-        },
-        {
-          "value": "male",
-          "text": "Male"
-        },
-        {
-          "value": "other",
-          "text": "Other"
-        },
-        {
-          "value": "prefer_not",
-          "text": "Prefer not to say"
-        }
-      ]
+      "section": "profile",
+      "type": "single_choice",
+      "prompt": "What is your gender?",
+      "image": null,
+      "choices": [
+        "Woman",
+        "Man",
+        "Prefer not to say"
+      ],
+      "has_other": false,
+      "profile": true
     },
     {
-      "id": "community_role",
-      "label": "What is your role in the community?",
-      "type": "select",
-      "required": true,
-      "options": [
-        {
-          "value": "resident",
-          "text": "Resident"
-        },
-        {
-          "value": "community_leader",
-          "text": "Community leader"
-        },
-        {
-          "value": "local_official",
-          "text": "Local official"
-        },
-        {
-          "value": "ngo_worker",
-          "text": "NGO / aid worker"
-        },
-        {
-          "value": "other",
-          "text": "Other"
-        }
-      ]
+      "id": "accra_tenure",
+      "section": "profile",
+      "type": "single_choice",
+      "prompt": "How long have you lived in Accra?",
+      "image": null,
+      "choices": [
+        "0-1 years",
+        "1-3 years",
+        "3-5 years",
+        "5-10 years",
+        "over 10 years"
+      ],
+      "has_other": false,
+      "profile": true
+    },
+    {
+      "id": "comm_tenure",
+      "section": "profile",
+      "type": "single_choice",
+      "prompt": "How long have you lived in this community?",
+      "image": null,
+      "choices": [
+        "0-1 years",
+        "1-3 years",
+        "3-5 years",
+        "5-10 years",
+        "over 10 years"
+      ],
+      "has_other": false,
+      "profile": true
     },
     {
       "id": "education",
-      "label": "Highest level of education completed?",
-      "type": "select",
-      "required": true,
-      "options": [
-        {
-          "value": "none",
-          "text": "No formal education"
-        },
-        {
-          "value": "primary",
-          "text": "Primary"
-        },
-        {
-          "value": "secondary",
-          "text": "Secondary"
-        },
-        {
-          "value": "tertiary",
-          "text": "Tertiary / university"
-        },
-        {
-          "value": "postgrad",
-          "text": "Postgraduate"
-        }
-      ]
+      "section": "profile",
+      "type": "single_choice",
+      "prompt": "What is the highest level of education you completed?",
+      "image": null,
+      "choices": [
+        "No formal education",
+        "Primary school",
+        "Middle school",
+        "High school",
+        "Higher education"
+      ],
+      "has_other": false,
+      "profile": true
     },
     {
-      "id": "stay_city",
-      "label": "How long have you lived in the city?",
-      "type": "select",
-      "required": true,
-      "options": [
-        {
-          "value": "0-1",
-          "text": "0-1 years"
-        },
-        {
-          "value": "1-3",
-          "text": "1-3 years"
-        },
-        {
-          "value": "3-5",
-          "text": "3-5 years"
-        },
-        {
-          "value": "5-10",
-          "text": "5-10 years"
-        },
-        {
-          "value": "more_10",
-          "text": "More than 10 years"
-        }
-      ]
+      "id": "role",
+      "section": "profile",
+      "type": "multiple_choice",
+      "prompt": "Do you have any special role in your community?",
+      "image": null,
+      "review": true,
+      "choices": [
+        "Community leader",
+        "Youth representative",
+        "Religious leader",
+        "School representative",
+        "Health worker",
+        "First responder",
+        "Caregiver",
+        "Trader",
+        "NGO member"
+      ],
+      "has_other": true,
+      "profile": true
     },
     {
-      "id": "stay_community",
-      "label": "How long have you lived in the community?",
-      "type": "select",
-      "required": true,
-      "options": [
-        {
-          "value": "0-1",
-          "text": "0-1 years"
-        },
-        {
-          "value": "1-3",
-          "text": "1-3 years"
-        },
-        {
-          "value": "3-5",
-          "text": "3-5 years"
-        },
-        {
-          "value": "5-10",
-          "text": "5-10 years"
-        },
-        {
-          "value": "more_10",
-          "text": "More than 10 years"
-        }
-      ]
+      "id": "flood_freq",
+      "section": "questions",
+      "type": "single_choice",
+      "prompt": "How often have floods affected you or your household?",
+      "image": null,
+      "choices": [
+        "Never",
+        "Once",
+        "A few times",
+        "Every rainy season"
+      ],
+      "has_other": false
     },
     {
-      "id": "affect_flood",
-      "label": "How often have floods affected you or your household?",
-      "type": "select",
-      "required": true,
-      "options": [
-        {
-          "value": "never",
-          "text": "Never"
-        },
-        {
-          "value": "once",
-          "text": "Once"
-        },
-        {
-          "value": "few",
-          "text": "Few times"
-        },
-        {
-          "value": "rainy_season",
-          "text": "Every rainy season"
-        }
-      ]
+      "id": "last_flood",
+      "section": "questions",
+      "type": "single_choice",
+      "prompt": "When was the last time it occurred?",
+      "image": null,
+      "choices": [
+        "This June",
+        "This year",
+        "Last year",
+        "I don't remember/know"
+      ],
+      "has_other": false
+    },
+    {
+      "id": "impacts",
+      "section": "questions",
+      "type": "multiple_choice",
+      "prompt": "Which of the following impacts have you experienced?",
+      "image": null,
+      "choices": [
+        "Property damage",
+        "Displacement",
+        "Loss of livelihood",
+        "Stress",
+        "Anxiety",
+        "Road disruption",
+        "Diseases"
+      ],
+      "has_other": true
+    },
+    {
+      "id": "info_recv",
+      "section": "questions",
+      "type": "word_prompt",
+      "prompt": "Which type of flood-related information do you currently receive?",
+      "image": null,
+      "max_words": 5,
+      "min_words": 1,
+      "max_chars": 30
+    },
+    {
+      "id": "info_source",
+      "section": "questions",
+      "type": "word_prompt",
+      "prompt": "Where does the information usually come from?",
+      "image": null,
+      "max_words": 5,
+      "min_words": 1,
+      "max_chars": 30
+    },
+    {
+      "id": "share_info",
+      "section": "questions",
+      "type": "single_choice",
+      "prompt": "Do you share flood information with others?",
+      "image": null,
+      "choices": [
+        "Yes",
+        "No"
+      ],
+      "has_other": false
+    },
+    {
+      "id": "when_use",
+      "section": "questions",
+      "type": "single_choice",
+      "prompt": "When do you normally use the flood-related information?",
+      "image": null,
+      "choices": [
+        "Before floods",
+        "During floods",
+        "After floods",
+        "I don't use them"
+      ],
+      "has_other": false
+    },
+    {
+      "id": "info_use",
+      "section": "questions",
+      "type": "word_prompt",
+      "prompt": "What did you use the flood-related information for?",
+      "image": null,
+      "max_words": 5,
+      "min_words": 1,
+      "max_chars": 30
     }
   ],
-  "questions": [
-    {
-      "id": "wp1",
-      "section": "words",
-      "type": "word_prompt",
-      "prompt": "What flood information do you currently receive?",
-      "image": null,
-      "max_words": 10,
-      "min_words": 1
-    },
-    {
-      "id": "wp2",
-      "section": "words",
-      "type": "word_prompt",
-      "prompt": "Where does this information usually come from?",
-      "image": null,
-      "max_words": 10,
-      "min_words": 1
-    },
-    {
-      "id": "wp3",
-      "section": "words",
-      "type": "word_prompt",
-      "prompt": "Which sources do you pay attention to or trust more?",
-      "image": null,
-      "max_words": 10,
-      "min_words": 1
-    },
-    {
-      "id": "wp4",
-      "section": "words",
-      "type": "word_prompt",
-      "prompt": "Do you also share flood information with others?",
-      "image": null,
-      "max_words": 10,
-      "min_words": 1
-    },
-    {
-      "id": "wp5",
-      "section": "words",
-      "type": "word_prompt",
-      "prompt": "How are residents currently involved in producing and sharing flood information?",
-      "image": null,
-      "max_words": 10,
-      "min_words": 1
-    },
-    {
-      "id": "wpf1",
-      "section": "words_future",
-      "type": "word_prompt",
-      "prompt": "How would you like to receive flood information?",
-      "image": null,
-      "max_words": 10,
-      "min_words": 1
-    },
-    {
-      "id": "wpf2",
-      "section": "words_future",
-      "type": "word_prompt",
-      "prompt": "Through which channels would you prefer to receive flood information?",
-      "image": null,
-      "max_words": 10,
-      "min_words": 1
-    },
-    {
-      "id": "wpf3",
-      "section": "words_future",
-      "type": "word_prompt",
-      "prompt": "Which format would be most useful?",
-      "image": null,
-      "max_words": 10,
-      "min_words": 1
-    },
-    {
-      "id": "wpf4",
-      "section": "words_future",
-      "type": "word_prompt",
-      "prompt": "How would you like to be involved in producing or sharing flood information?",
-      "image": null,
-      "max_words": 10,
-      "min_words": 1
-    }
-  ],
-  "discussion_prompts": [
-    {
-      "id": "d1",
-      "text": "How do you interpret different flood information elements?",
-      "image": null
-    },
-    {
-      "id": "d2",
-      "text": "What do you think this shows?",
-      "image": "images/prompts/w1.png"
-    },
-    {
-      "id": "d3",
-      "text": "Using this image, can you easily see where you need to go in case of flood?",
-      "image": "images/prompts/d2.gif"
-    }
-  ],
-  "likert_stimuli": [
+  "stimuli": [
     {
       "id": "st1",
       "title": "SMS text alert",
-      "body": "FLOOD ALERT: Heavy rain expected tonight. Move to higher ground if you are near the river.",
-      "image": null
+      "slides": [
+        {
+          "image": "images/prompts/sms.png",
+          "caption": "A phone SMS: 'FLOOD ALERT: Heavy rain expected tonight. Move to higher ground if you are near the river.'"
+        }
+      ],
+      "image": "images/prompts/sms.png",
+      "caption": "A phone SMS: 'FLOOD ALERT: Heavy rain expected tonight. Move to higher ground if you are near the river.'"
     },
     {
       "id": "st2",
-      "title": "Flood depth map",
-      "body": null,
-      "image": "images/prompts/fd_map.jpg"
+      "title": "Flood map",
+      "slides": [
+        {
+          "image": "images/prompts/fd_map.jpg",
+          "caption": "Flood depth map: colour-coded water depth by area."
+        },
+        {
+          "image": "images/prompts/fe_map.jpg",
+          "caption": "Flood extent map: which areas are expected to flood."
+        }
+      ],
+      "image": "images/prompts/fd_map.jpg",
+      "caption": "Flood depth map: colour-coded water depth by area."
     },
     {
       "id": "st3",
-      "title": "Flood extent map",
-      "body": null,
-      "image": "images/prompts/fe_map.jpg"
+      "title": "Community radio notice",
+      "slides": [
+        {
+          "image": "images/prompts/radio.png",
+          "caption": "A spoken radio announcement warning residents of rising water over the next 12 hours."
+        }
+      ],
+      "image": "images/prompts/radio.png",
+      "caption": "A spoken radio announcement warning residents of rising water over the next 12 hours."
+    }
+  ],
+  "wordcloud": [
+    {
+      "id": "wc1",
+      "section": "wordcloud",
+      "prompt": "Through which channels would you prefer to receive flood information?",
+      "image": null,
+      "max_words": 5,
+      "min_words": 1,
+      "max_chars": 30
     },
     {
-      "id": "st4",
-      "title": "Community radio notice",
-      "body": "A spoken radio announcement warning residents of rising water levels over the next 12 hours.",
-      "image": "images/prompts/d1.gif"
+      "id": "wc2",
+      "section": "wordcloud",
+      "prompt": "Which format would be most useful?",
+      "image": null,
+      "max_words": 5,
+      "min_words": 1,
+      "max_chars": 30
+    },
+    {
+      "id": "wc3",
+      "section": "wordcloud",
+      "prompt": "What is the most important improvement needed in the current flood communication approach you have in place?",
+      "image": null,
+      "max_words": 5,
+      "min_words": 1,
+      "max_chars": 30
+    },
+    {
+      "id": "wc4",
+      "section": "wordcloud",
+      "prompt": "Is there anything we are missing in today's discussion?",
+      "image": null,
+      "max_words": 5,
+      "min_words": 1,
+      "max_chars": 30
     }
   ]
 }

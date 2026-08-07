@@ -132,10 +132,10 @@ h2.title { font-family: var(--font-display); font-size: 1.3rem; font-weight: 600
 
 /* ---- Confirm summary ---- */
 .summary { margin: 0.5rem 0 1rem; border: 1.5px solid var(--color-border); border-radius: var(--radius); overflow: hidden; }
-.summary__row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.85rem 1rem; }
+.summary__row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.85rem 1rem; align-items: baseline; }
 .summary__row + .summary__row { border-top: 1px solid var(--color-border); }
-.summary__key { color: var(--color-muted); }
-.summary__val { font-weight: 600; text-align: right; }
+.summary__key { color: var(--color-muted); flex: 1 1 auto; }
+.summary__val { font-weight: 600; text-align: right; flex: 0 1 auto; overflow-wrap: anywhere; }
 
 /* ---- Buttons / actions ---- */
 .actions { display: flex; gap: 0.75rem; margin-top: 1.25rem; }
@@ -205,6 +205,15 @@ h2.title { font-family: var(--font-display); font-size: 1.3rem; font-weight: 600
 }
 .stimulus-card__title { font-weight: 700; margin-bottom: 0.5rem; }
 .stimulus-card__img { width: 100%; height: auto; border-radius: 8px; margin: 0.25rem 0 0.6rem; }
+/* Stimulus slide carousel (participant-controlled; arrows stop at the ends). */
+.carousel__nav { display: flex; align-items: center; justify-content: center; gap: 1rem; margin: 0.4rem 0 0.2rem; }
+.carousel__arrow {
+  width: 2.6rem; height: 2.6rem; flex: 0 0 auto; border-radius: 50%;
+  border: 1.5px solid var(--color-border); background: var(--color-surface);
+  color: var(--color-text); font-size: 1.4rem; line-height: 1; cursor: pointer;
+}
+.carousel__arrow:disabled { opacity: 0.35; cursor: default; }
+.carousel__count { font-size: 0.85rem; color: var(--color-muted); min-width: 3rem; text-align: center; }
 .stimulus-card__body { color: var(--color-text); }
 .likert-rows { display: flex; flex-direction: column; gap: 1.1rem; }
 .likert-dim { font-weight: 600; margin-bottom: 0.5rem; }
@@ -216,7 +225,11 @@ h2.title { font-family: var(--font-display); font-size: 1.3rem; font-weight: 600
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 .scale__btn--on { background: var(--color-accent); color: var(--color-accent-contrast); border-color: var(--color-accent); }
-.scale__ends { display: flex; justify-content: space-between; margin-top: 0.35rem; font-size: 0.75rem; color: var(--color-muted); }
+/* Sparse labels aligned to the scale columns: only ends + midpoint are filled. */
+.scale__ticks { display: grid; gap: 0.4rem; margin-top: 0.35rem; font-size: 0.72rem; color: var(--color-muted); }
+.scale__ticks span { text-align: center; }
+.scale__ticks span:first-child { text-align: left; }
+.scale__ticks span:last-child { text-align: right; }
 
 /* Optional word-prompt image */
 .prompt-img { width: 100%; height: auto; border-radius: 8px; margin: 0 0 1rem; border: 1.5px solid var(--color-border); }
@@ -243,11 +256,22 @@ h2.title { font-family: var(--font-display); font-size: 1.3rem; font-weight: 600
 }
 .broadcast__label { font-size: 0.8rem; color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.6rem; }
 .broadcast__msg { font-family: var(--font-display); font-size: 1.3rem; line-height: 1.4; margin-bottom: 1.3rem; }
+.broadcast__img { display: block; width: 100%; height: auto; max-height: 82vh; object-fit: contain; border-radius: 8px; margin-bottom: 1.3rem; background: #fff; }
+.broadcast__box--image { max-width: 96vw; }
 .broadcast__box .btn { width: 100%; }
 
-/* ---- Discussion (host-synced display) ---- */
+/* ---- Notice screens (completion / welcome-back) ---- */
+.notice { text-align: center; padding-top: 1.5rem; }
+.notice .lead { font-size: 1.15rem; line-height: 1.5; margin: 0.8rem 0 1.4rem; }
+.notice__wait { font-size: 0.85rem; }
+
+/* ---- Assessment (host-synced figure + reveal-on-demand scale) ---- */
+.disc__counter { font-size: 0.8rem; margin: 0.2rem 0 0.9rem; text-align: center; }
+.assess-hold { text-align: center; font-size: 0.9rem; padding: 1.2rem 0 0.4rem; }
+.assess-status { margin-top: 0.6rem; font-size: 0.85rem; }
+
+/* ---- Discussion (legacy styles retained for shared counter class) ---- */
 .disc { text-align: center; padding-top: 0.5rem; }
-.disc__counter { font-size: 0.8rem; margin-bottom: 0.8rem; }
 .disc__img { max-width: 100%; max-height: 52vh; object-fit: contain; border-radius: var(--radius); margin-bottom: 1rem; }
 .disc__text { font-family: var(--font-display); font-size: 1.45rem; line-height: 1.45; margin-bottom: 1.2rem; }
 .disc__hint { font-size: 0.85rem; }

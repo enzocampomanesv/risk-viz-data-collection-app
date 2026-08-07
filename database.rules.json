@@ -12,7 +12,13 @@
         "created_at":     { ".validate": "newData.isNumber()" },
         "session":        { ".validate": "newData.isString()" },
         "participant_no": { ".validate": "newData.isString() && newData.val().length <= 80" },
-        "fields":         { ".validate": "newData.hasChildren()" },
+        "fields": {
+          ".validate": "newData.hasChildren()",
+          "$fid": {
+            ".validate": "newData.isString() || newData.hasChildren()",
+            "$i": { ".validate": "newData.isString()" }
+          }
+        },
         "fields_ts":      { ".validate": "newData.isNumber()" },
         "consent":        { ".validate": "newData.hasChildren(['version','ts'])" },
         "progress":       { ".validate": true },
@@ -44,14 +50,13 @@
         ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
         ".write": "auth != null && ($uid === auth.uid || auth.token.admin === true)",
         "$stim": {
-          ".validate": "newData.hasChildren(['comprehension','usefulness','access','trust','ts'])",
-          "comprehension": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10" },
-          "usefulness":    { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10" },
-          "access":        { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10" },
-          "trust":         { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10" },
-          "session":       { ".validate": "newData.isString()" },
-          "ts":            { ".validate": "newData.isNumber()" },
-          "$other":        { ".validate": false }
+          ".validate": "newData.hasChildren(['clarity','usefulness','trust','ts'])",
+          "clarity":    { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 7" },
+          "usefulness": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 7" },
+          "trust":      { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 7" },
+          "session":    { ".validate": "newData.isString()" },
+          "ts":         { ".validate": "newData.isNumber()" },
+          "$other":     { ".validate": false }
         }
       }
     },
@@ -90,15 +95,50 @@
       ".write": "auth != null && auth.token.admin === true",
       "session":        { ".validate": "newData.isString()" },
       "gating_enabled": { ".validate": "newData.isBoolean()" },
-      "presentation_idx": { ".validate": "newData.isNumber()" },
+      "pres": {
+        "$section_id": {
+          ".validate": "newData.hasChildren(['idx'])",
+          "idx":          { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "likert_shown": { ".validate": "newData.isBoolean()" },
+          "$other":       { ".validate": false }
+        }
+      },
       "back_questionnaire": { ".validate": "newData.isBoolean()" },
       "back_end":        { ".validate": "newData.isBoolean()" },
       "section_gates":  { "$section_id": { ".validate": "newData.isString()" } },
       "broadcast": {
-        ".validate": "newData.hasChildren(['text','ts'])",
+        ".validate": "newData.hasChild('ts') && (newData.hasChild('text') || newData.hasChild('image'))",
         "text":   { ".validate": "newData.isString() && newData.val().length <= 500" },
+        "image":  { ".validate": "newData.isString() && newData.val().length <= 1400000" },
+        "label":  { ".validate": "newData.isString() && newData.val().length <= 200" },
         "ts":     { ".validate": "newData.isNumber()" },
         "$other": { ".validate": false }
+      },
+      "word_cleaning": {
+        "$session": {
+          "$prompt": {
+            ".validate": "newData.hasChild('ts')",
+            "ts":    { ".validate": "newData.isNumber()" },
+            "model": { ".validate": "newData.isString() && newData.val().length <= 80" },
+            "removed": {
+              "$term": {
+                "reason":     { ".validate": "newData.isString() && newData.val().length <= 200" },
+                "overridden": { ".validate": "newData.isBoolean()" },
+                "$other":     { ".validate": false }
+              }
+            },
+            "merges": {
+              "$canon": {
+                "canonical":  { ".validate": "newData.isString()" },
+                "overridden": { ".validate": "newData.isBoolean()" },
+                "members":    { "$m": { ".validate": "newData.isBoolean()" } },
+                "split":      { "$m": { ".validate": "newData.isBoolean()" } },
+                "$other":     { ".validate": false }
+              }
+            },
+            "$other": { ".validate": false }
+          }
+        }
       },
       "force_section": {
         ".validate": "newData.hasChildren(['section_id','session','ts'])",

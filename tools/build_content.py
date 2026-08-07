@@ -56,8 +56,17 @@ def questionnaire_section_ids():
     """Ordered ids of questionnaire sections in config.json (for scoping
     questions). First entry is the default home for un-tagged questions."""
     try:
-        cfg = json.load(open(os.path.join(ROOT, "config", "config.json")))
+        cfg = json.load(open(os.path.join(ROOT, "config", "config.json"), encoding="utf-8"))
         return [s["id"] for s in cfg.get("sections", []) if s.get("type") == "questionnaire"]
+    except Exception:
+        return []
+
+def wordcloud_section_ids():
+    """Ordered ids of wordcloud sections in config.json (for scoping wordcloud
+    prompts). First entry is the default home for un-tagged prompts."""
+    try:
+        cfg = json.load(open(os.path.join(ROOT, "config", "config.json"), encoding="utf-8"))
+        return [s["id"] for s in cfg.get("sections", []) if s.get("type") == "wordcloud"]
     except Exception:
         return []
 
@@ -93,47 +102,29 @@ def main():
     kv = {s(r.get("key")): r.get("value") for r in recs}
     settings = {
         "likert_points": as_int(kv.get("likert_points"), 5, "[settings] likert_points"),
+        "anchor_low":  s(kv.get("anchor_low"))  or "Not at all",
+        "anchor_mid":  s(kv.get("anchor_mid"))  or "Partially",
+        "anchor_high": s(kv.get("anchor_high")) or "Very much",
     }
-    if settings["likert_points"] < 2:
-        errors.append("[settings] likert_points must be 2 or more.")
+    if settings["likert_points"] < 3 or settings["likert_points"] % 2 == 0:
+        errors.append("[settings] likert_points must be an odd number >= 3 (e.g. 3, 5, or 7) "
+                      "so the scale has a true midpoint.")
+    # Free-text notice copy: any key starting with notice_ is carried through as-is.
+    for k, v in kv.items():
+        if k.startswith("notice_"):
+            settings[k] = s(v)
     content["settings"] = settings
 
-    # ---------- registration -> participant_fields ----------
-    recs, _ = read_sheet(wb, "registration")
-    fields, by_id, order = {}, set(), []
-    TYPE_MAP = {"single-choice": "select", "single_choice": "select", "select": "select",
-                "text": "text", "number": "number", "numerical": "number", "numeric": "number"}
-    for r in recs:
-        fid = s(r.get("field_id"))
-        if not fid:
-            errors.append(f"[registration row {r['__row']}] missing field_id."); continue
-        if fid not in fields:
-            ftype = TYPE_MAP.get(s(r.get("type")).lower(), "select")
-            fields[fid] = {"id": fid, "label": s(r.get("label")), "type": ftype,
-                           "required": as_bool(r.get("required"), True), "options": []}
-            order.append(fid)
-        ov = s(r.get("option_value"))
-        if ov:
-            fields[fid]["options"].append({"value": ov, "text": s(r.get("option_text")) or ov})
-        if s(r.get("label")) and not fields[fid]["label"]:
-            fields[fid]["label"] = s(r.get("label"))
-    pf = []
-    for fid in order:
-        f = fields[fid]
-        if not f["label"]:
-            errors.append(f"[registration] field '{fid}' has no label.")
-        if f["type"] == "select" and not f["options"]:
-            errors.append(f"[registration] single-choice field '{fid}' has no options.")
-        if f["type"] != "select":
-            f.pop("options")
-        pf.append(f)
-    content["participant_fields"] = pf
-
     # ---------- questions (questionnaire content) ----------
-    # Long format like the registration tab: one row per choice, the question id
-    # repeated down the rows. The FIRST row for an id is its header (type/prompt/
-    # image/has_other/word limits); every row (header included) may carry one
+    # Long format: one row per choice, the question id repeated down the rows.
+    # The FIRST row for an id is its header (type/prompt/image/profile/review/
+    # has_other/word limits); every row (header included) may carry one
     # choice_text. A repeated id means "same question", not a duplicate.
+    #
+    # profile=yes marks a single/multiple-choice question whose answer is stored
+    # as a participant attribute (for grouping/filtering results); participant_
+    # fields are derived from these in config-loader.js, so there's no separate
+    # registration tab. review=yes marks a "check your answers" summary point.
     recs, _ = read_sheet(wb, "questions")
     q_secs = questionnaire_section_ids()
     default_q_sec = q_secs[0] if q_secs else None
@@ -160,8 +151,11 @@ def main():
             byid[rid] = {"id": rid, "row": row, "type": qtype,
                          "section": s(r.get("section")) or default_q_sec,
                          "prompt": s(r.get("prompt")), "image": resolve_image(r.get("image")),
+                         "profile": as_bool(r.get("profile"), False),
+                         "review": as_bool(r.get("review"), False),
                          "has_other": as_bool(r.get("has_other"), False),
                          "max_words_raw": r.get("max_words"), "min_words_raw": r.get("min_words"),
+                         "max_chars_raw": r.get("max_chars"),
                          "choices": []}
             order.append(rid)
         ct = s(r.get("choice_text"))
@@ -182,51 +176,95 @@ def main():
         check_image(q["image"], where)
         rec = {"id": rid, "section": q["section"], "type": q["type"],
                "prompt": q["prompt"], "image": q["image"]}
+        if q["review"]:
+            rec["review"] = True
         if q["type"] in CHOICE_TYPES:
             if len(q["choices"]) < 2:
                 errors.append(f"{where} needs at least 2 choices (has {len(q['choices'])}). "
                               f"Add a row per choice with the same id.")
             rec["choices"] = q["choices"]
             rec["has_other"] = q["has_other"]
+            if q["profile"]:
+                rec["profile"] = True
         else:  # word_prompt
+            if q["profile"]:
+                errors.append(f"{where} profile=yes is only allowed on single_choice / "
+                              f"multiple_choice questions (a word_prompt can't be a group key).")
             maxw = as_int(q["max_words_raw"], 5, f"{where} max_words")
             minw = as_int(q["min_words_raw"], 1, f"{where} min_words")
+            maxc = as_int(q["max_chars_raw"], 30, f"{where} max_chars")
             if minw < 1: errors.append(f"{where} min_words must be >= 1.")
             if maxw < minw: errors.append(f"{where} max_words < min_words.")
+            if maxc < 1: errors.append(f"{where} max_chars must be >= 1.")
             if q["choices"]:
                 warnings.append(f"{where} is a word_prompt but has choice_text rows — they are ignored.")
             if q["has_other"]:
                 warnings.append(f"{where} has_other is ignored on a word_prompt.")
             rec["max_words"] = maxw
             rec["min_words"] = minw
+            rec["max_chars"] = maxc
         clean.append(rec)
     content["questions"] = clean
 
-    # ---------- discussion ----------
-    recs, _ = read_sheet(wb, "discussion")
-    seen, clean = set(), []
+    # ---------- stimuli (assessment figures) ----------
+    # Long format: one row per SLIDE, the stimulus id repeated down the rows.
+    # A stimulus is one id + one title (the Likert attaches to the id) holding a
+    # carousel of slides; each row contributes a slide = its image and/or caption.
+    # One row for an id = a single slide (behaves like before).
+    recs, _ = read_sheet(wb, "stimuli")
+    order, byid = [], {}
     for r in recs:
         rid, row = s(r.get("id")), r["__row"]
-        if not rid: errors.append(f"[discussion row {row}] missing id."); continue
-        dup_check(seen, rid, f"[discussion row {row}]")
-        text, img = s(r.get("text")) or None, resolve_image(r.get("image"))
-        if not text and not img: errors.append(f"[discussion row {row}] needs text or image.")
-        check_image(img, f"[discussion row {row}]")
-        clean.append({"id": rid, "text": text, "image": img})
-    content["discussion_prompts"] = clean
+        if not rid:
+            errors.append(f"[stimuli row {row}] missing id."); continue
+        if rid not in byid:
+            byid[rid] = {"id": rid, "title": None, "slides": []}
+            order.append(rid)
+        if s(r.get("title")) and not byid[rid]["title"]:
+            byid[rid]["title"] = s(r.get("title"))
+        img = resolve_image(r.get("image"))
+        cap = s(r.get("caption")) or None
+        check_image(img, f"[stimuli row {row}]")
+        if img or cap:
+            byid[rid]["slides"].append({"image": img, "caption": cap})
+    clean = []
+    for rid in order:
+        stim = byid[rid]
+        if not stim["slides"]:
+            errors.append(f"[stimuli '{rid}'] needs at least one row with an image or caption.")
+            continue
+        # Top-level image/caption mirror the first slide for any single-slide
+        # consumer (control-room preview, dashboard labels).
+        stim["image"] = stim["slides"][0]["image"]
+        stim["caption"] = stim["slides"][0]["caption"]
+        clean.append(stim)
+    content["stimuli"] = clean
 
-    # ---------- likert_stimuli ----------
-    recs, _ = read_sheet(wb, "likert_stimuli")
+    # ---------- wordcloud (host-paced word prompts) ----------
+    recs, _ = read_sheet(wb, "wordcloud")
+    wc_secs = wordcloud_section_ids()
+    default_wc_sec = wc_secs[0] if wc_secs else None
     seen, clean = set(), []
     for r in recs:
         rid, row = s(r.get("id")), r["__row"]
-        if not rid: errors.append(f"[likert_stimuli row {row}] missing id."); continue
-        dup_check(seen, rid, f"[likert_stimuli row {row}]")
-        body, img = s(r.get("body")), resolve_image(r.get("image"))
-        if not body and not img: warnings.append(f"[likert_stimuli row {row}] has neither body nor image.")
-        check_image(img, f"[likert_stimuli row {row}]")
-        clean.append({"id": rid, "title": s(r.get("title")) or None, "body": body or None, "image": img})
-    content["likert_stimuli"] = clean
+        if not rid: errors.append(f"[wordcloud row {row}] missing id."); continue
+        dup_check(seen, rid, f"[wordcloud row {row}]")
+        prompt = s(r.get("prompt"))
+        if not prompt: errors.append(f"[wordcloud row {row}] missing prompt.")
+        img = resolve_image(r.get("image")); check_image(img, f"[wordcloud row {row}]")
+        maxw = as_int(r.get("max_words"), 5, f"[wordcloud row {row}] max_words")
+        minw = as_int(r.get("min_words"), 1, f"[wordcloud row {row}] min_words")
+        maxc = as_int(r.get("max_chars"), 30, f"[wordcloud row {row}] max_chars")
+        if minw < 1: errors.append(f"[wordcloud row {row}] min_words must be >= 1.")
+        if maxw < minw: errors.append(f"[wordcloud row {row}] max_words < min_words.")
+        if maxc < 1: errors.append(f"[wordcloud row {row}] max_chars must be >= 1.")
+        sec = s(r.get("section")) or default_wc_sec
+        if wc_secs and sec not in wc_secs:
+            errors.append(f"[wordcloud row {row}] section '{sec}' is not a wordcloud section "
+                          f"(valid: {', '.join(wc_secs)}).")
+        clean.append({"id": rid, "section": sec, "prompt": prompt, "image": img,
+                      "max_words": maxw, "min_words": minw, "max_chars": maxc})
+    content["wordcloud"] = clean
 
     if errors:
         print("BUILD FAILED — fix these and re-run:\n  - " + "\n  - ".join(errors))
@@ -234,14 +272,15 @@ def main():
         sys.exit(1)
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    json.dump(content, open(OUT, "w"), indent=2, ensure_ascii=False)
+    json.dump(content, open(OUT, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
     counts = ", ".join(f"{k}={len(v)}" for k, v in content.items() if isinstance(v, list))
     print(f"OK — wrote {os.path.relpath(OUT, ROOT)}  ({counts})")
     qtypes = {}
     for q in content["questions"]:
         qtypes[q["type"]] = qtypes.get(q["type"], 0) + 1
     qsummary = ", ".join(f"{t}={n}" for t, n in qtypes.items()) or "none"
-    print(f"   questions: {qsummary} | likert={settings['likert_points']}pt")
+    nprofile = sum(1 for q in content["questions"] if q.get("profile"))
+    print(f"   questions: {qsummary} | profile={nprofile} | likert={settings['likert_points']}pt")
     if warnings:
         print("Warnings (non-blocking):\n  - " + "\n  - ".join(warnings))
 

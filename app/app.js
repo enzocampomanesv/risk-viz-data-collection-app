@@ -40,9 +40,7 @@ const App = {
     backFlags: { questionnaire: false, end: false },
     participant: {},          // mirror of participants/{uid}
     sectionIndex: 0,          // index into config.sections
-    reg: { step: 0, answers: {} },  // registration sub-state
-    q: { step: 0, answers: {} },    // questionnaire sub-state (one question per step)
-    lk: { step: 0, answers: {} },   // likert sub-state
+    q: { step: 0, answers: {}, sectionId: null, reviewing: false },  // questionnaire sub-state
     gateRef: null             // active gate listener, if waiting
   },
 
@@ -167,29 +165,47 @@ const App = {
   async assignParticipantNumber() {
     if (this.state.participant.participant_no) return this.state.participant.participant_no;
     const session = this.state.session;
-    let n;
     try {
       const res = await this.db.ref(`participant_seq/${this.seqKey(session)}`)
         .transaction((cur) => (cur || 0) + 1);
       if (!res.committed) return null;
-      n = res.snapshot.val();
+      const n = res.snapshot.val();
+      const pno = `${session}-${String(n).padStart(3, "0")}`;
+      await this.db.ref(`participants/${this.state.uid}`).update({ participant_no: pno });
+      this.state.participant.participant_no = pno;
+      return pno;
     } catch (e) {
-      // Non-fatal: the uid still identifies the participant. Don't block the flow.
-      console.error("participant_seq transaction failed", e);
+      // Numbering is a cosmetic label — never let it block the participant; the
+      // real uid still identifies them. A permission_denied here almost always
+      // means database.rules.json hasn't been deployed yet (see SETUP.md).
+      console.error("participant numbering failed (continuing without it)", e);
       return null;
     }
-    const pno = `${session}-${String(n).padStart(3, "0")}`;
-    await this.db.ref(`participants/${this.state.uid}`).update({ participant_no: pno });
-    this.state.participant.participant_no = pno;
-    return pno;
   },
 
-  async writeRegistration(answers) {
-    await this.db.ref(`participants/${this.state.uid}`).update({
-      fields: answers,
-      fields_ts: firebase.database.ServerValue.TIMESTAMP
-    });
-    this.state.participant.fields = answers;
+  // Resolve a choice question's selected option index to its stored value: the
+  // plain choice text, or (for the "Other" slot) the participant's typed text.
+  selectedValue(question, i, otherText) {
+    const choices = question.choices || [];
+    if (question.has_other && i === choices.length) return (otherText || "").trim();
+    return ConfigLoader.stripMarkup(choices[i] || "");
+  },
+
+  // Write a profile question's answer as a participant attribute (single value,
+  // or an array of values for multiple_choice). Stored under participants/fields
+  // so the control room and dashboard can group/filter by it.
+  async writeProfileChoice(question, ans, isMulti) {
+    let val;
+    if (isMulti) {
+      val = ans.idxs.slice().sort((a, b) => a - b).map((i) => this.selectedValue(question, i, ans.other));
+    } else {
+      val = this.selectedValue(question, ans.idx, ans.other);
+    }
+    const updates = { fields_ts: firebase.database.ServerValue.TIMESTAMP };
+    updates[`fields/${question.id}`] = val;
+    await this.db.ref(`participants/${this.state.uid}`).update(updates);
+    this.state.participant.fields = this.state.participant.fields || {};
+    this.state.participant.fields[question.id] = val;
   },
 
   /* --------------------------- rendering --------------------------- */
@@ -210,7 +226,9 @@ const App = {
     const cfg = this.state.config;
     const section = cfg.sections[this.state.sectionIndex];
     if (!section) return this.renderComplete();
-    if (section.type === "discussion") return this.renderDiscussionFlow(section);
+    if (section.type === "assessment") return this.renderAssessmentFlow(section);
+    if (section.type === "wordcloud") return this.renderWordcloudFlow(section);
+    if (section.type === "notice") return this.renderNotice(section);
     if (this.isGated(section)) return this.renderGated(section);
     return this.renderSection(section);
   },
@@ -298,9 +316,10 @@ const App = {
   renderSection(section) {
     switch (section.type) {
       case "consent":       return this.renderConsent(section);
-      case "registration":  return this.renderRegistration(section);
       case "questionnaire": return this.renderQuestionnaire(section);
-      case "likert":        return this.renderLikert(section);
+      case "notice":        return this.renderNotice(section);
+      case "assessment":    return this.renderAssessmentFlow(section);
+      case "wordcloud":     return this.renderWordcloudFlow(section);
       default:              return this.renderError(`Unknown section type: ${section.type}`);
     }
   },
@@ -315,9 +334,14 @@ const App = {
      an optional free-text "Other"), and word_prompt. */
   renderQuestionnaire(section) {
     const q = this.state.q;
+    // Entering a different questionnaire section (forward completion or a
+    // force-move) restarts at its first question. Intra-section navigation keeps
+    // q.step, so this only fires on an actual section change.
+    if (q.sectionId !== section.id) { q.sectionId = section.id; q.step = 0; q.reviewing = false; }
     const questions = section.questions || [];
     if (!questions.length) { this.setProgress(this.state.sectionIndex + 1).then(() => this.render()); return; }
     if (q.step >= questions.length) q.step = questions.length - 1;
+    if (q.reviewing) return this.renderReviewSummary(section);
     const question = questions[q.step];
     switch (question.type) {
       case "word_prompt":     return this.renderWordQuestion(section, question);
@@ -336,9 +360,14 @@ const App = {
     if (q.step > 0) { q.step--; this.renderQuestionnaire(section); }
     else this.prevSection();
   },
+  // Called after an answer is written. If the just-answered question carries a
+  // review flag, show the "check your answers" summary instead of advancing;
+  // otherwise move to the next question, or the next section at the end.
   async qNext(section) {
     const q = this.state.q;
     const questions = section.questions || [];
+    const cur = questions[q.step];
+    if (cur && cur.review && !q.reviewing) { q.reviewing = true; return this.renderQuestionnaire(section); }
     if (q.step + 1 < questions.length) { q.step++; this.renderQuestionnaire(section); }
     else { await this.setProgress(this.state.sectionIndex + 1); this.render(); }
   },
@@ -443,7 +472,8 @@ const App = {
       if (!valid()) return;
       nextBtn.disabled = true;
       try {
-        if (isMulti) await this.writeMultipleChoice(question, ans);
+        if (question.profile) await this.writeProfileChoice(question, ans, isMulti);
+        else if (isMulti) await this.writeMultipleChoice(question, ans);
         else await this.writeSingleChoice(question, ans);
       } catch (e) { return this.renderError(e.message); }
       this.qNext(section);
@@ -475,64 +505,283 @@ const App = {
     await this.db.ref(`choices/${this.state.uid}/${question.id}`).set(rec);
   },
 
-  /* ----- discussion: host-synced display. Host navigates prompts; opening the
-     gate releases (auto-advances) the whole group. Participants have no Back/
-     Continue, so pacing is entirely host-controlled. ----- */
-  renderDiscussionFlow(section) {
-    const gated = this.state.gatingEnabled && section.gate;
-    this._presIdx = this._presIdx || 0;
-    this.detachPres();
-    this.detachGate();
-
-    this._presRef = this.db.ref("control/presentation_idx");
-    this._presHandler = (s) => {
-      this._presIdx = (typeof s.val() === "number") ? s.val() : 0;
-      this.paintDiscussion(section);
-    };
-    this._presRef.on("value", this._presHandler);
-
-    if (gated) {
-      // Gate "open" = host releases the group → advance everyone automatically.
-      const ref = this.db.ref(`control/section_gates/${section.id}`);
-      const handler = (s) => {
-        if (s.val() === "open") {
-          this.detachPres();
-          this.detachGate();
-          this.setProgress(this.state.sectionIndex + 1).then(() => this.render());
-        } else {
-          this.paintDiscussion(section);
-        }
-      };
-      this.state.gateRef = { ref, handler };
-      ref.on("value", handler);
-    } else {
-      this.paintDiscussion(section);
+  // Human-readable summary of one question's in-memory answer, for the review
+  // screen. Single/multiple choice resolve indices to their option text (or the
+  // typed "Other"); word prompts join their entries.
+  answerSummary(question) {
+    const ans = this.state.q.answers[question.id];
+    if (question.type === "word_prompt") {
+      return (Array.isArray(ans) && ans.length) ? ans.join(", ") : "—";
     }
+    if (!ans) return "—";
+    if (question.type === "multiple_choice") {
+      if (!ans.idxs || !ans.idxs.length) return "—";
+      return ans.idxs.slice().sort((a, b) => a - b)
+        .map((i) => this.selectedValue(question, i, ans.other)).join(", ");
+    }
+    if (ans.idx == null) return "—";
+    return this.selectedValue(question, ans.idx, ans.other);
   },
 
-  paintDiscussion(section) {
+  // "Check your answers" screen, shown when a review-flagged question is reached.
+  // Lists every question in this section up to and including the review marker.
+  renderReviewSummary(section) {
+    const q = this.state.q;
+    const questions = (section.questions || []).slice(0, q.step + 1);
+    const rows = questions.map((question) =>
+      `<div class="summary__row">
+         <span class="summary__key">${ConfigLoader.fmtInline(question.prompt)}</span>
+         <span class="summary__val">${escapeHTML(this.answerSummary(question))}</span>
+       </div>`
+    ).join("");
+
+    this.mount(`
+      <h2 class="title">Please check your answers</h2>
+      <div class="summary">${rows}</div>
+      <div class="actions">
+        <button id="rev-back" class="btn btn--ghost">Back</button>
+        <button id="rev-confirm" class="btn btn--primary">Looks good</button>
+      </div>
+    `);
+
+    document.getElementById("rev-back").addEventListener("click", () => {
+      // Leave review mode and return to the marker question so answers can be
+      // corrected (and stepped back further from there).
+      q.reviewing = false;
+      this.renderQuestionnaire(section);
+    });
+    document.getElementById("rev-confirm").addEventListener("click", async (e) => {
+      e.target.disabled = true;
+      q.reviewing = false;
+      if (q.step + 1 < (section.questions || []).length) { q.step++; this.renderQuestionnaire(section); }
+      else { await this.setProgress(this.state.sectionIndex + 1); this.render(); }
+    });
+  },
+
+  /* ----- notice: a between-activity screen (completion / welcome-back). Its
+     copy comes from the settings tab. Participants have no controls; the host
+     advances the whole room with "Move everyone here". ----- */
+  renderNotice(section) {
+    this.detachGate();
+    this.detachPres();
+    this.mount(`
+      <div class="notice">
+        <h2 class="title">${ConfigLoader.fmtInline(section.title || "")}</h2>
+        ${section.body ? `<p class="lead">${ConfigLoader.fmtInline(section.body)}</p>` : ""}
+        <div class="notice__wait muted">Please wait for the facilitator.</div>
+      </div>
+    `, { withProgress: false, withFooter: true });
+  },
+
+  /* ----- assessment: merged discussion + Likert, fully host-driven. The host
+     shows a figure, the room discusses, then the host reveals the scale; the
+     participant scores the three configured questions and may keep editing
+     until the host advances the figure. Participant state is a pure mirror of
+     control/pres/{sectionId} = { idx, likert_shown }; the section is entered
+     and left by the host's force-move. ----- */
+  renderAssessmentFlow(section) {
+    this.detachPres();
+    this.detachGate();
+    this._presState = { idx: 0, likert_shown: false };
+    this._presRef = this.db.ref(`control/pres/${section.id}`);
+    this._presHandler = (s) => {
+      const v = s.val() || {};
+      // Defensive: a figure change always hides the scale, regardless of the
+      // flag's write ordering, so figure N+1 never inherits N's revealed scale.
+      const idx = (typeof v.idx === "number") ? v.idx : 0;
+      const revealed = v.likert_shown === true && idx === (typeof v.idx === "number" ? v.idx : 0);
+      this._presState = { idx, likert_shown: revealed };
+      this.paintAssessment(section);
+    };
+    this._presRef.on("value", this._presHandler);
+  },
+
+  paintAssessment(section) {
+    const stimuli = section.stimuli || [];
+    const n = stimuli.length;
+    const idx = Math.max(0, Math.min(this._presState.idx, Math.max(0, n - 1)));
+    const stim = stimuli[idx] || {};
+    const showLikert = this._presState.likert_shown && n > 0;
+
+    const L = this.state.config.likert;
+    const dims = L.dimensions || [];
+    const points = L.points || 5;
+    const anchors = L.anchors || [];
+
+    // In-memory scores per figure (editable until the host advances).
+    this.state.assess = this.state.assess || {};
+    if (!this.state.assess[stim.id]) this.state.assess[stim.id] = {};
+    const ans = this.state.assess[stim.id];
+    this._assessSubmitted = this._assessSubmitted || {};
+
+    // Slides: one stimulus can hold several (image and/or caption). The Likert
+    // score attaches to stim.id, not the slide. Fall back to the top-level
+    // image/caption for single-slide stimuli authored the old way.
+    const slides = (stim.slides && stim.slides.length)
+      ? stim.slides : [{ image: stim.image, caption: stim.caption }];
+    this._assessSlide = this._assessSlide || {};
+    if (this._assessSlide[stim.id] == null) this._assessSlide[stim.id] = 0;
+    let si = Math.max(0, Math.min(this._assessSlide[stim.id], slides.length - 1));
+    this._assessSlide[stim.id] = si;
+
+    const slideInner = (i) => {
+      const sl = slides[i] || {};
+      const img = sl.image ? `<img class="stimulus-card__img" src="${escapeHTML(sl.image)}" alt="${escapeHTML(stim.title || "")}">` : "";
+      const cap = sl.caption ? `<div class="stimulus-card__body">${escapeHTML(sl.caption)}</div>` : "";
+      const nav = slides.length > 1 ? `
+        <div class="carousel__nav">
+          <button class="carousel__arrow" id="cz-prev" ${i <= 0 ? "disabled" : ""} aria-label="Previous image">‹</button>
+          <span class="carousel__count">${i + 1} / ${slides.length}</span>
+          <button class="carousel__arrow" id="cz-next" ${i >= slides.length - 1 ? "disabled" : ""} aria-label="Next image">›</button>
+        </div>` : "";
+      return img + cap + nav;
+    };
+
+    const scaleHTML = (dim) => {
+      let btns = "";
+      for (let p = 1; p <= points; p++) {
+        const on = ans[dim.id] === p;
+        btns += `<button class="scale__btn ${on ? "scale__btn--on" : ""}" type="button"
+                   data-dim="${dim.id}" data-val="${p}"
+                   aria-label="${escapeHTML(anchors[p - 1] || String(p))}">${p}</button>`;
+      }
+      // Sparse labels: low at the start, high at the end, mid under the centre.
+      return `<div class="likert-row">
+          <div class="likert-dim">${escapeHTML(dim.label)}</div>
+          <div class="scale" role="radiogroup" aria-label="${escapeHTML(dim.label)}"
+               style="grid-template-columns:repeat(${points},1fr)">${btns}</div>
+          <div class="scale__ticks" style="grid-template-columns:repeat(${points},1fr)">${
+            anchors.map((a) => `<span>${escapeHTML(a || "")}</span>`).join("")
+          }</div>
+        </div>`;
+    };
+
+    const likertBlock = showLikert ? `
+      <div class="likert-rows">${dims.map(scaleHTML).join("")}</div>
+      <div class="actions">
+        <button id="as-submit" class="btn btn--primary" disabled>Submit</button>
+      </div>
+      <div id="as-status" class="muted assess-status"></div>
+    ` : `
+      <div class="assess-hold muted">Please follow the facilitator. Scoring will open shortly.</div>
+    `;
+
+    this.mount(`
+      <div class="stimulus-card">
+        ${stim.title ? `<div class="stimulus-card__title">${escapeHTML(stim.title)}</div>` : ""}
+        <div id="as-carousel" class="carousel">${slideInner(si)}</div>
+      </div>
+      <div class="disc__counter muted">${n ? (idx + 1) + " / " + n : ""}</div>
+      ${likertBlock}
+    `, { withFooter: true });
+
+    // Wire the slide carousel (participant-paced; arrows stop at the ends).
+    const carousel = document.getElementById("as-carousel");
+    const wireCarousel = () => {
+      const prev = document.getElementById("cz-prev");
+      const next = document.getElementById("cz-next");
+      if (prev) prev.addEventListener("click", () => {
+        si = Math.max(0, si - 1); this._assessSlide[stim.id] = si;
+        carousel.innerHTML = slideInner(si); wireCarousel();
+      });
+      if (next) next.addEventListener("click", () => {
+        si = Math.min(slides.length - 1, si + 1); this._assessSlide[stim.id] = si;
+        carousel.innerHTML = slideInner(si); wireCarousel();
+      });
+    };
+    wireCarousel();
+
+    if (!showLikert) return;
+
+    const submitBtn = document.getElementById("as-submit");
+    const statusEl = document.getElementById("as-status");
+    const allAnswered = () => dims.every((d) => typeof ans[d.id] === "number");
+    const submitted = () => this._assessSubmitted[stim.id];
+    const refresh = () => {
+      submitBtn.disabled = !allAnswered();
+      submitBtn.textContent = submitted() ? "Update" : "Submit";
+      statusEl.textContent = submitted()
+        ? "Saved. You can still change your answers until the group moves on."
+        : "";
+    };
+
+    this.el().querySelectorAll(".scale__btn").forEach((b) =>
+      b.addEventListener("click", () => {
+        const dimId = b.dataset.dim, val = +b.dataset.val;
+        ans[dimId] = val;
+        this.el().querySelectorAll(`.scale__btn[data-dim="${dimId}"]`).forEach((x) =>
+          x.classList.toggle("scale__btn--on", +x.dataset.val === val)
+        );
+        refresh();
+      })
+    );
+    submitBtn.addEventListener("click", async () => {
+      if (!allAnswered()) return;
+      submitBtn.disabled = true;
+      try { await this.writeAssessment(stim.id, ans); }
+      catch (e) { return this.renderError(e.message); }
+      this._assessSubmitted[stim.id] = true;
+      refresh();
+    });
+    refresh();
+  },
+
+  /* ----- wordcloud: host-paced word prompts, single step. The host shows one
+     prompt at a time (control/pres/{sectionId}.idx) with the input open; the
+     participant types words and may keep editing until the host advances. Same
+     word_responses store as the questionnaire word prompts. Entered/left by the
+     host's force-move (or by finishing the prior section). ----- */
+  renderWordcloudFlow(section) {
+    this.detachPres();
+    this.detachGate();
+    this._presState = { idx: 0 };
+    this._presRef = this.db.ref(`control/pres/${section.id}`);
+    this._presHandler = (s) => {
+      const v = s.val() || {};
+      this._presState = { idx: (typeof v.idx === "number") ? v.idx : 0 };
+      this.paintWordcloud(section);
+    };
+    this._presRef.on("value", this._presHandler);
+  },
+
+  paintWordcloud(section) {
     const prompts = section.prompts || [];
     const n = prompts.length;
-    const idx = Math.max(0, Math.min(this._presIdx, Math.max(0, n - 1)));
+    const idx = Math.max(0, Math.min(this._presState.idx, Math.max(0, n - 1)));
     const p = prompts[idx] || {};
-    const img = p.image ? `<img class="disc__img" src="${escapeHTML(p.image)}" alt="">` : "";
-    const text = p.text ? `<div class="disc__text">${escapeHTML(p.text)}</div>` : "";
-    // Host-controlled: no participant Back/Continue (the host releases the group
-    // by opening the gate). Continue appears ONLY in fully self-paced mode
-    // (gating master switch off), so participants are never stranded there.
-    const selfPaced = !(this.state.gatingEnabled && section.gate);
+    const maxW = p.max_words || 5, minW = p.min_words || 1, maxC = p.max_chars || 30;
+
+    this.state.wc = this.state.wc || {};
+    if (!this.state.wc[p.id]) this.state.wc[p.id] = [];
+    const words = this.state.wc[p.id];
+    this._wcSubmitted = this._wcSubmitted || {};
+
     this.mount(`
-      <div class="disc">
-        <div class="disc__counter muted">${n ? (idx + 1) + " / " + n : ""}</div>
-        ${img}${text}
-        ${selfPaced ? "" : `<div class="disc__hint muted">Please follow the facilitator.</div>`}
-        ${selfPaced ? `<div class="actions"><button id="disc-continue" class="btn btn--primary">Continue</button></div>` : ""}
-      </div>
+      <div class="disc__counter muted">${n ? (idx + 1) + " / " + n : ""}</div>
+      <div class="question">${ConfigLoader.fmtInline(p.prompt || "")}</div>
+      ${p.image ? `<img class="prompt-img" src="${escapeHTML(p.image)}" alt="" />` : ""}
+      ${this.chipInputHTML()}
+      <div class="actions"><button id="wc-submit" class="btn btn--primary" disabled>Submit</button></div>
+      <div id="wc-status" class="muted assess-status"></div>
     `, { withFooter: true });
-    const cont = document.getElementById("disc-continue");
-    if (cont) cont.addEventListener("click", () => {
-      this.detachPres(); this.detachGate();
-      this.setProgress(this.state.sectionIndex + 1).then(() => this.render());
+
+    const submitBtn = document.getElementById("wc-submit");
+    const statusEl = document.getElementById("wc-status");
+    const submitted = () => this._wcSubmitted[p.id];
+    this.wireChipInput(words, maxW, minW, maxC, () => {
+      submitBtn.disabled = words.length < minW;
+      submitBtn.textContent = submitted() ? "Update" : "Submit";
+      statusEl.textContent = submitted()
+        ? "Saved. You can still change your answer until the group moves on." : "";
+    });
+    submitBtn.addEventListener("click", async () => {
+      if (words.length < minW) return;
+      submitBtn.disabled = true;
+      try { await this.writeWords(p.id, words); }
+      catch (e) { return this.renderError(e.message); }
+      this._wcSubmitted[p.id] = true;
+      submitBtn.textContent = "Update";
+      statusEl.textContent = "Saved. You can still change your answer until the group moves on.";
     });
   },
 
@@ -556,13 +805,12 @@ const App = {
   },
 
   seedSubState(section) {
-    if (section.type === "registration") {
-      this.state.reg.answers = Object.assign({}, this.state.participant.fields || {});
-      this.state.reg.step = this.state.config.participant_fields.length; // land on confirm
-    } else if (section.type === "questionnaire") {
-      this.state.q.step = 0;   // answers retained in memory this session
-    } else if (section.type === "likert") {
-      this.state.lk.step = 0;
+    if (section.type === "questionnaire") {
+      // Re-entering a questionnaire section (via Back or force-move): restart at
+      // its first question. Answers stay in memory, so prior picks re-appear.
+      this.state.q.step = 0;
+      this.state.q.reviewing = false;
+      this.state.q.sectionId = section.id;
     }
   },
 
@@ -620,107 +868,6 @@ const App = {
       await this.writeConsent(c.version);
       await this.assignParticipantNumber();
       await this.setProgress(this.state.sectionIndex + 1);
-      this.state.reg = { step: 0, answers: {} };
-      this.render();
-    });
-  },
-
-  /* ----- registration: one field per screen, then confirm ----- */
-  renderRegistration() {
-    const fields = this.state.config.participant_fields;
-    const reg = this.state.reg;
-    if (Object.keys(reg.answers).length === 0 && this.state.participant.fields) {
-      reg.answers = Object.assign({}, this.state.participant.fields);
-    }
-
-    if (reg.step >= fields.length) return this.renderRegConfirm(fields);
-
-    const field = fields[reg.step];
-    const current = reg.answers[field.id] != null ? reg.answers[field.id] : null;
-    const isInput = field.type === "text" || field.type === "number";
-
-    let inputHTML;
-    if (isInput) {
-      const t = field.type === "number" ? "number" : "text";
-      inputHTML = `<input id="reg-input" class="text-input" type="${t}"
-                     inputmode="${field.type === "number" ? "decimal" : "text"}"
-                     value="${current != null ? escapeHTML(String(current)) : ""}"
-                     placeholder="Type your answer" autocomplete="off">`;
-    } else {
-      inputHTML = `<div class="options" role="radiogroup" aria-label="${escapeHTML(field.label)}">${
-        (field.options || []).map((o) => `<button class="option ${current === o.value ? "option--selected" : ""}" data-val="${escapeHTML(o.value)}">
-            <span>${escapeHTML(o.text)}</span><span class="option__check"></span></button>`).join("")
-      }</div>`;
-    }
-
-    this.mount(`
-      <div class="question">${escapeHTML(field.label)}</div>
-      ${inputHTML}
-      <div class="actions">
-        ${(reg.step > 0 || this.state.sectionIndex > 0) ? `<button id="reg-back" class="btn btn--ghost">Back</button>` : ""}
-        <button id="reg-next" class="btn btn--primary" disabled>Continue</button>
-      </div>
-    `);
-
-    const nextBtn = document.getElementById("reg-next");
-    const valid = () => {
-      const v = reg.answers[field.id];
-      if (field.required === false) return true;
-      return v != null && String(v).trim() !== "";
-    };
-    const refresh = () => { nextBtn.disabled = !valid(); };
-
-    if (isInput) {
-      const inp = document.getElementById("reg-input");
-      inp.addEventListener("input", () => {
-        if (inp.value === "") { delete reg.answers[field.id]; }
-        else { reg.answers[field.id] = field.type === "number" ? Number(inp.value) : inp.value; }
-        refresh();
-      });
-      inp.addEventListener("keydown", (e) => { if (e.key === "Enter" && valid()) nextBtn.click(); });
-    } else {
-      this.el().querySelectorAll(".option").forEach((b) =>
-        b.addEventListener("click", () => { reg.answers[field.id] = b.dataset.val; this.renderRegistration(); })
-      );
-    }
-
-    const back = document.getElementById("reg-back");
-    if (back) back.addEventListener("click", () => {
-      if (reg.step > 0) { reg.step--; this.renderRegistration(); }
-      else this.prevSection();
-    });
-    nextBtn.addEventListener("click", () => {
-      if (!valid()) return;
-      reg.step++; this.renderRegistration();
-    });
-    refresh();
-  },
-
-  renderRegConfirm(fields) {
-    const reg = this.state.reg;
-    const rows = fields.map((f) => {
-      const val = reg.answers[f.id];
-      let text;
-      if (val == null || String(val).trim() === "") text = "—";
-      else if (f.options) text = (f.options.find((o) => o.value === val) || {}).text || val;
-      else text = String(val);
-      return `<div class="summary__row"><span class="summary__key">${escapeHTML(f.label)}</span><span class="summary__val">${escapeHTML(String(text))}</span></div>`;
-    }).join("");
-
-    this.mount(`
-      <h2 class="title">Please check your answers</h2>
-      <div class="summary">${rows}</div>
-      <div class="actions">
-        <button id="conf-back" class="btn btn--ghost">Back</button>
-        <button id="conf-submit" class="btn btn--primary">Looks good</button>
-      </div>
-    `);
-
-    document.getElementById("conf-back").addEventListener("click", () => { reg.step = fields.length - 1; this.renderRegistration(); });
-    document.getElementById("conf-submit").addEventListener("click", async (e) => {
-      e.target.disabled = true;
-      await this.writeRegistration(reg.answers);
-      await this.setProgress(this.state.sectionIndex + 1);
       this.render();
     });
   },
@@ -734,35 +881,29 @@ const App = {
     });
   },
 
-  renderWordQuestion(section, question) {
-    const q = this.state.q;
-    const maxW = question.max_words || 5;
-    const minW = question.min_words || 1;
-    if (!q.answers[question.id]) q.answers[question.id] = [];
-    const words = q.answers[question.id];
-
-    this.mount(`
-      <div class="question">${ConfigLoader.fmtInline(question.prompt)}</div>
-      ${question.image ? `<img class="prompt-img" src="${escapeHTML(question.image)}" alt="" />` : ""}
+  // Shared chip-input for word entry (used by the self-paced questionnaire
+  // word_prompt and the host-paced wordcloud section). Returns the markup; wire
+  // it after mount with wireChipInput.
+  chipInputHTML() {
+    return `
       <div class="chip-input">
         <input id="wa-input" type="text" inputmode="text" autocomplete="off"
                autocapitalize="none" spellcheck="false" placeholder="Type a word" aria-label="Type a word" />
         <button id="wa-add" class="btn btn--ghost chip-input__add" type="button">Add</button>
       </div>
       <div id="wa-counter" class="muted chip-counter"></div>
-      <div id="wa-chips" class="chips" aria-live="polite"></div>
-      <div class="actions">
-        ${this.qShowBack() ? `<button id="q-back" class="btn btn--ghost">Back</button>` : ""}
-        <button id="q-next" class="btn btn--primary">Continue</button>
-      </div>
-    `);
+      <div id="wa-chips" class="chips" aria-live="polite"></div>`;
+  },
 
+  // Wire the chip input into whatever mount already contains chipInputHTML().
+  // Mutates `words` in place; calls onChange() on every change. Returns a
+  // refresh() the caller can invoke after mutating state (e.g. after submit).
+  wireChipInput(words, maxW, minW, maxC, onChange) {
     const input = document.getElementById("wa-input");
     const addBtn = document.getElementById("wa-add");
     const chipsEl = document.getElementById("wa-chips");
     const counterEl = document.getElementById("wa-counter");
-    const nextBtn = document.getElementById("q-next");
-    const backBtn = document.getElementById("q-back");
+    input.maxLength = maxC;
 
     const refresh = () => {
       chipsEl.innerHTML = words.map((w, i) =>
@@ -771,22 +912,45 @@ const App = {
       chipsEl.querySelectorAll(".chip__remove").forEach((b) =>
         b.addEventListener("click", () => { words.splice(+b.dataset.i, 1); refresh(); })
       );
-      counterEl.textContent = `${words.length} of ${maxW} word${maxW === 1 ? "" : "s"}`;
+      counterEl.textContent = `${words.length} of ${maxW} entr${maxW === 1 ? "y" : "ies"} · up to ${maxC} characters each`;
       const atMax = words.length >= maxW;
       input.disabled = atMax; addBtn.disabled = atMax;
       input.placeholder = atMax ? "Maximum reached" : "Type a word";
-      nextBtn.disabled = words.length < minW;
+      if (onChange) onChange();
     };
-
     const add = () => {
-      const raw = (input.value || "").trim();
+      const raw = (input.value || "").trim().slice(0, maxC);
       if (!raw || words.length >= maxW) { input.value = ""; return; }
       if (words.some((w) => w.toLowerCase() === raw.toLowerCase())) { input.value = ""; return; }
       words.push(raw); input.value = ""; refresh(); input.focus();
     };
-
     addBtn.addEventListener("click", add);
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } });
+    refresh();
+    return refresh;
+  },
+
+  renderWordQuestion(section, question) {
+    const q = this.state.q;
+    const maxW = question.max_words || 5;
+    const minW = question.min_words || 1;
+    const maxC = question.max_chars || 30;
+    if (!q.answers[question.id]) q.answers[question.id] = [];
+    const words = q.answers[question.id];
+
+    this.mount(`
+      <div class="question">${ConfigLoader.fmtInline(question.prompt)}</div>
+      ${question.image ? `<img class="prompt-img" src="${escapeHTML(question.image)}" alt="" />` : ""}
+      ${this.chipInputHTML()}
+      <div class="actions">
+        ${this.qShowBack() ? `<button id="q-back" class="btn btn--ghost">Back</button>` : ""}
+        <button id="q-next" class="btn btn--primary">Continue</button>
+      </div>
+    `);
+
+    const nextBtn = document.getElementById("q-next");
+    const backBtn = document.getElementById("q-back");
+    this.wireChipInput(words, maxW, minW, maxC, () => { nextBtn.disabled = words.length < minW; });
     if (backBtn) backBtn.addEventListener("click", () => this.qBack(section));
     nextBtn.addEventListener("click", async () => {
       if (words.length < minW) return;
@@ -794,91 +958,14 @@ const App = {
       await this.writeWords(question.id, words);
       this.qNext(section);
     });
-
-    refresh();
   },
 
-  /* ----- likert: one stimulus per screen, four dimensions, 5-point scale ----- */
+  // Assessment score write. Keyed by stimulus; the three configured dimensions
+  // plus session/ts. Editable resubmission just overwrites the same node.
   async writeAssessment(stimId, scores) {
     const payload = { session: this.state.session, ts: firebase.database.ServerValue.TIMESTAMP };
     this.state.config.likert.dimensions.forEach((d) => { payload[d.id] = scores[d.id]; });
     await this.db.ref(`assessments/${this.state.uid}/${stimId}`).set(payload);
-  },
-
-  renderLikert(section) {
-    const lk = this.state.lk;
-    const stimuli = section.stimuli || [];
-    const stim = stimuli[lk.step];
-    const L = this.state.config.likert;
-    const dims = L.dimensions;
-    const points = L.points || 5;
-    const anchors = L.anchors || [];
-    if (!lk.answers[stim.id]) lk.answers[stim.id] = {};
-    const ans = lk.answers[stim.id];
-
-    const cleanAnchor = (s) => (s || "").replace(/^\s*\d+\s*[-–—:.]\s*/, "");
-    const leftCap = cleanAnchor(anchors[0]);
-    const rightCap = cleanAnchor(anchors[points - 1]);
-
-    const scaleHTML = (dim) => {
-      let btns = "";
-      for (let p = 1; p <= points; p++) {
-        const on = ans[dim.id] === p;
-        btns += `<button class="scale__btn ${on ? "scale__btn--on" : ""}" type="button"
-                   data-dim="${dim.id}" data-val="${p}"
-                   aria-label="${escapeHTML(anchors[p - 1] || String(p))}">${p}</button>`;
-      }
-      return `<div class="likert-row">
-          <div class="likert-dim">${escapeHTML(dim.label)}</div>
-          <div class="scale" role="radiogroup" aria-label="${escapeHTML(dim.label)}"
-               style="grid-template-columns:repeat(${points},1fr)">${btns}</div>
-          <div class="scale__ends"><span>${escapeHTML(leftCap)}</span><span>${escapeHTML(rightCap)}</span></div>
-        </div>`;
-    };
-
-    const imgHTML = stim.image
-      ? `<img class="stimulus-card__img" src="${escapeHTML(stim.image)}" alt="${escapeHTML(stim.title || "")}">` : "";
-
-    this.mount(`
-      <div class="stimulus-card">
-        ${stim.title ? `<div class="stimulus-card__title">${escapeHTML(stim.title)}</div>` : ""}
-        ${imgHTML}
-        ${stim.body ? `<div class="stimulus-card__body">${escapeHTML(stim.body)}</div>` : ""}
-      </div>
-      <div class="likert-rows">${dims.map(scaleHTML).join("")}</div>
-      <div class="actions">
-        ${(lk.step > 0 || this.state.sectionIndex > 0) ? `<button id="lk-back" class="btn btn--ghost">Back</button>` : ""}
-        <button id="lk-next" class="btn btn--primary" disabled>Continue</button>
-      </div>
-    `);
-
-    const nextBtn = document.getElementById("lk-next");
-    const backBtn = document.getElementById("lk-back");
-    const allAnswered = () => dims.every((d) => typeof ans[d.id] === "number");
-    const refreshNext = () => { nextBtn.disabled = !allAnswered(); };
-
-    this.el().querySelectorAll(".scale__btn").forEach((b) =>
-      b.addEventListener("click", () => {
-        const dimId = b.dataset.dim, val = +b.dataset.val;
-        ans[dimId] = val;
-        this.el().querySelectorAll(`.scale__btn[data-dim="${dimId}"]`).forEach((x) =>
-          x.classList.toggle("scale__btn--on", +x.dataset.val === val)
-        );
-        refreshNext();
-      })
-    );
-    if (backBtn) backBtn.addEventListener("click", () => {
-      if (lk.step > 0) { lk.step--; this.renderLikert(section); }
-      else this.prevSection();
-    });
-    nextBtn.addEventListener("click", async () => {
-      if (!allAnswered()) return;
-      nextBtn.disabled = true;
-      await this.writeAssessment(stim.id, ans);
-      if (lk.step + 1 < stimuli.length) { lk.step++; this.renderLikert(section); }
-      else { await this.setProgress(this.state.sectionIndex + 1); this.render(); }
-    });
-    refreshNext();
   },
 
   renderComplete() {
@@ -901,11 +988,15 @@ const App = {
   renderBroadcast(b) {
     const el = document.getElementById("broadcast");
     if (!el) return;
-    if (b && b.text && this._dismissedBroadcastTs !== b.ts) {
+    const hasContent = b && (b.text || b.image);
+    if (hasContent && this._dismissedBroadcastTs !== b.ts) {
+      const body = b.image
+        ? `<img class="broadcast__img" src="${escapeHTML(b.image)}" alt="Word cloud from the facilitator" />`
+        : `<div class="broadcast__label">Message from the facilitator</div>
+           <div class="broadcast__msg">${escapeHTML(b.text)}</div>`;
       el.innerHTML = `
-        <div class="broadcast__box" role="alertdialog" aria-modal="true">
-          <div class="broadcast__label">Message from the facilitator</div>
-          <div class="broadcast__msg">${escapeHTML(b.text)}</div>
+        <div class="broadcast__box ${b.image ? "broadcast__box--image" : ""}" role="alertdialog" aria-modal="true">
+          ${body}
           <button id="broadcast-close" class="btn btn--primary">Close</button>
         </div>`;
       el.style.display = "flex";
@@ -914,7 +1005,7 @@ const App = {
         el.style.display = "none";
         el.innerHTML = "";
       });
-    } else if (!b || !b.text) {
+    } else if (!hasContent) {
       el.style.display = "none";
       el.innerHTML = "";
     }

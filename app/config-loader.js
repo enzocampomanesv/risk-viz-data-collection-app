@@ -7,8 +7,7 @@
 const ConfigLoader = (function () {
 
   const VALID_SECTION_TYPES = [
-    "consent", "registration", "questionnaire",
-    "discussion", "likert"
+    "consent", "questionnaire", "notice", "assessment", "wordcloud"
   ];
 
   // Question types allowed inside a questionnaire section.
@@ -42,11 +41,18 @@ const ConfigLoader = (function () {
       .replace(RE_BOLD, "$1");
   }
 
-  // Likert anchors derived from the number of points (set in the settings tab).
-  function anchorsFor(points) {
-    if (points === 3) return ["Disagree", "Neutral", "Agree"];
-    if (points === 5) return ["1 - Not at all", "2", "3 - Neutral", "4", "5 - Very much"];
-    return Array.from({ length: points }, (_, i) => String(i + 1));
+  // Scale labels: only the two ends and the exact midpoint are labelled; interior
+  // points are blank. Requires an odd point count so the midpoint is a real
+  // position. Labels come from the settings tab (anchor_low/mid/high).
+  function anchorsFor(points, lo, mid, hi) {
+    lo = lo || "Not at all"; mid = mid || "Partially"; hi = hi || "Very much";
+    const midPos = (points - 1) / 2; // 0-based index of the middle point
+    return Array.from({ length: points }, (_, i) => {
+      if (i === 0) return lo;
+      if (i === points - 1) return hi;
+      if (i === midPos) return mid;
+      return "";
+    });
   }
 
   // Merge Excel-derived content into the config structure. Content is the source
@@ -55,25 +61,53 @@ const ConfigLoader = (function () {
     if (!content) return;
     const settings = content.settings || {};
     cfg.settings = settings;
-    if (Array.isArray(content.participant_fields)) cfg.participant_fields = content.participant_fields;
 
     // Likert points + anchors come from settings; dimensions stay in config.json.
     cfg.likert = cfg.likert || {};
     const pts = typeof settings.likert_points === "number" ? settings.likert_points : (cfg.likert.points || 5);
     cfg.likert.points = pts;
-    cfg.likert.anchors = anchorsFor(pts);
+    cfg.likert.anchors = anchorsFor(pts, settings.anchor_low, settings.anchor_mid, settings.anchor_high);
 
     // First questionnaire section id — the home for any question that doesn't
     // carry a `section` (blank cell in the Excel `questions` tab).
     const firstQSec = (cfg.sections.find((s) => s.type === "questionnaire") || {}).id;
+    const firstWcSec = (cfg.sections.find((s) => s.type === "wordcloud") || {}).id;
 
     cfg.sections.forEach((sec) => {
       if (sec.type === "questionnaire" && Array.isArray(content.questions)) {
         sec.questions = content.questions.filter((q) => (q.section || firstQSec) === sec.id);
       }
-      if (sec.type === "discussion" && Array.isArray(content.discussion_prompts)) sec.prompts = content.discussion_prompts;
-      if (sec.type === "likert" && Array.isArray(content.likert_stimuli)) sec.stimuli = content.likert_stimuli;
+      // Host-paced word-cloud prompts, scoped to their section like questions.
+      if (sec.type === "wordcloud" && Array.isArray(content.wordcloud)) {
+        sec.prompts = content.wordcloud.filter((p) => (p.section || firstWcSec) === sec.id);
+      }
+      // Assessment (merged discussion + Likert): every assessment section shows
+      // the same ordered list of stimuli.
+      if (sec.type === "assessment" && Array.isArray(content.stimuli)) sec.stimuli = content.stimuli;
+      // Notice screens pull their copy from settings via the keys named in config.
+      if (sec.type === "notice") {
+        sec.title = settings[sec.title_key] || sec.title || "";
+        sec.body = settings[sec.body_key] || sec.body || "";
+      }
     });
+
+    // Derive participant_fields from profile-flagged questions (there is no
+    // separate registration tab). A profile question's answer is stored as a
+    // participant attribute and can group/filter results. Single-choice profile
+    // = one value; multiple-choice profile = a set (multi: true). Option values
+    // are the plain choice texts, so grouping labels and exports stay readable.
+    const profileQs = [];
+    cfg.sections.forEach((sec) => {
+      if (sec.type !== "questionnaire") return;
+      (sec.questions || []).forEach((q) => { if (q.profile && Array.isArray(q.choices)) profileQs.push(q); });
+    });
+    cfg.participant_fields = profileQs.map((q) => ({
+      id: q.id,
+      label: q.prompt,
+      type: "select",
+      multi: q.type === "multiple_choice",
+      options: q.choices.map((c) => { const v = stripMarkup(c); return { value: v, text: v }; })
+    }));
   }
 
   // Per-question structural check for questionnaire sections. Mirrors the
@@ -91,6 +125,7 @@ const ConfigLoader = (function () {
         errors.push(`${where} (${q.type}) needs at least 2 choices`);
       }
     } else { // word_prompt
+      if (q.profile) errors.push(`${where} profile is only valid on single_choice / multiple_choice`);
       if (typeof q.max_words !== "number" || typeof q.min_words !== "number") {
         errors.push(`${where} (word_prompt) needs numeric max_words and min_words`);
       } else if (q.min_words < 1 || q.max_words < q.min_words) {
@@ -110,15 +145,18 @@ const ConfigLoader = (function () {
         if (!f.id) errors.push(`participant_fields[${i}] missing "id"`);
         if (!f.label) errors.push(`participant_fields[${i}] missing "label"`);
         if (f.type === "select" && !Array.isArray(f.options)) {
-          errors.push(`participant_fields[${i}] (single-choice) missing options — add option rows in the registration tab`);
+          errors.push(`participant_fields[${i}] missing options (derived from a profile question's choices)`);
         }
       });
     } else {
-      errors.push(`"participant_fields" missing (registration tab → content.json)`);
+      errors.push(`"participant_fields" missing (should be derived from profile questions)`);
     }
 
     if (cfg.likert) {
       if (typeof cfg.likert.points !== "number") errors.push(`likert.points must be a number (settings tab)`);
+      else if (cfg.likert.points < 3 || cfg.likert.points % 2 === 0) {
+        errors.push(`likert.points must be an odd number >= 3 (3, 5, or 7) for a true midpoint`);
+      }
       if (!Array.isArray(cfg.likert.anchors) || cfg.likert.anchors.length !== cfg.likert.points) {
         errors.push(`likert.anchors length must equal likert.points (${cfg.likert.points})`);
       }
@@ -144,11 +182,27 @@ const ConfigLoader = (function () {
             s.questions.forEach((q, qi) => validateQuestion(q, `sections[${i}].questions[${qi}]`, errors));
           }
         }
-        if (s.type === "discussion" && (!Array.isArray(s.prompts) || s.prompts.length === 0)) {
-          errors.push(`discussion section has no prompts (discussion tab)`);
+        if (s.type === "assessment" && (!Array.isArray(s.stimuli) || s.stimuli.length === 0)) {
+          errors.push(`assessment section "${s.id}" has no stimuli (stimuli tab)`);
         }
-        if (s.type === "likert" && (!Array.isArray(s.stimuli) || s.stimuli.length === 0)) {
-          errors.push(`likert section has no stimuli (likert_stimuli tab)`);
+        if (s.type === "wordcloud") {
+          if (!Array.isArray(s.prompts) || s.prompts.length === 0) {
+            errors.push(`wordcloud section "${s.id}" has no prompts (wordcloud tab)`);
+          } else {
+            s.prompts.forEach((p, pi) => {
+              const w = `sections[${i}].prompts[${pi}]`;
+              if (!p.id) errors.push(`${w} missing "id"`);
+              if (!p.prompt) errors.push(`${w} missing "prompt"`);
+              if (typeof p.max_words !== "number" || typeof p.min_words !== "number") {
+                errors.push(`${w} needs numeric max_words and min_words`);
+              } else if (p.min_words < 1 || p.max_words < p.min_words) {
+                errors.push(`${w} requires 1 <= min_words <= max_words`);
+              }
+            });
+          }
+        }
+        if (s.type === "notice" && (!s.title && !s.body)) {
+          errors.push(`notice section "${s.id}" has no title/body (settings keys ${s.title_key} / ${s.body_key})`);
         }
       });
     } else {

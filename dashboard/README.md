@@ -1,10 +1,8 @@
-# Dashboard (Python side of Path C)
+# Dashboard
 
-Quick-look analytics + clean export over the live Firebase data. The Bradley-
-Terry fit here is an **approximate sanity-check** (same `sigmoid(strength_a −
-strength_b)` model as the AI-voter training, but strengths fit by MLE directly
-to the human comparisons). The **comparison export is the real deliverable**
-for your full BT pipeline.
+Quick-look analytics + clean export over the live Firebase data, with a
+**cross-filter** that restricts every analytical view to the respondents
+matching conditions on their answers.
 
 ## One-time setup
 1. `pip install -r requirements.txt`  (reuse your dashboard/.venv)
@@ -18,11 +16,26 @@ for your full BT pipeline.
 streamlit run dashboard/app.py
 ```
 
+## Cross-filter
+Pick a number of conditions in the sidebar. Each condition is a question plus one
+or more of its values. For multi-select questions you can require the answer to
+**include any** or **include all** of the chosen values; conditions **AND**
+together. Example: `impacts includes Property damage` AND `impacts includes
+Stress` restricts the Word clouds, Likert and Choices tabs to just those
+respondents. The sidebar shows how many of the in-session respondents match.
+
+Any single- or multiple-choice question can be a filter condition (profile
+demographics and ordinary questions alike). Word prompts are free text and are
+not filterable.
+
 ## Notes
-- Config (attribute filters, Likert dimensions, item labels) is fetched **live**
-  from Hosting so it matches what participants saw; falls back to the local
-  `config/` files if offline. Override the URL with `DASHBOARD_HOSTING_URL`.
-- Everything filters by **session**. New `participant_fields` appear as filters
-  automatically — no code change.
-- Tabs: Overview · Word clouds · Likert · Pairwise rankings · Export (CSV per
-  table + a single SQLite `.db`).
+- Config (attribute filters, dimensions, labels) is fetched **live** from
+  Hosting so it matches what participants saw; falls back to the local `config/`
+  files if offline. Override the URL with `DASHBOARD_HOSTING_URL`.
+- Everything filters by **session**. Profile questions become group-by
+  attributes automatically; a multi-select attribute uses overlapping membership
+  (a respondent appears in every group they belong to), so grouped counts can
+  exceed the respondent total.
+- Tabs: Overview · Word clouds · Likert · Choices · Export (CSV per table + a
+  single SQLite `.db`). The Export tab is session-filtered only, not
+  cross-filtered, so you always get the full session dataset.

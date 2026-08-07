@@ -13,9 +13,9 @@ function esc(s) {
 }
 
 const SECTION_LABELS = {
-  consent: "Consent", registration: "Registration",
-  questionnaire: "Questionnaire", discussion: "Discussion",
-  likert: "Likert"
+  consent: "Consent",
+  questionnaire: "Questionnaire", notice: "Notice",
+  assessment: "Assessment", wordcloud: "Word cloud"
 };
 const labelFor = (s) => (s.label ? s.label : (SECTION_LABELS[s.type] || s.id));
 
@@ -100,9 +100,11 @@ const Control = {
 
   /* ----------------------------- panel ----------------------------- */
   renderPanel() {
-    const gated = this.config.sections.filter((s) => s.gate && s.type !== "discussion");
-    const disc = this.config.sections.find((s) => s.type === "discussion");
-    const discPrompts = disc ? (disc.prompts || []) : [];
+    const gated = this.config.sections.filter((s) => s.gate && s.type !== "assessment" && s.type !== "wordcloud");
+    const assess = this.config.sections.find((s) => s.type === "assessment");
+    const stimuli = assess ? (assess.stimuli || []) : [];
+    const wc = this.config.sections.find((s) => s.type === "wordcloud");
+    const wcPrompts = wc ? (wc.prompts || []) : [];
 
     this.el().innerHTML = `
       <div class="ctrl-wrap">
@@ -148,24 +150,40 @@ const Control = {
           </div>`).join("")}
         </div>
 
-        ${disc ? `
-        <div class="card" id="disc-card">
-          <h2>Discussion</h2>
-          <p class="hint">Everyone's screen shows the prompt you pick. Release them to the next section when discussion is done.</p>
+        ${assess ? `
+        <div class="card" id="assess-card">
+          <h2>Format assessment</h2>
+          <p class="hint">Everyone sees the figure you pick. Discuss it, then reveal the scale so participants can score it. Moving to the next figure hides the scale again.</p>
           <div class="disc-nav">
-            <button id="disc-prev" class="btn-sm">‹ Prev</button>
-            <span id="disc-pos">– / ${discPrompts.length}</span>
-            <button id="disc-next" class="btn-sm">Next ›</button>
+            <button id="as-prev" class="btn-sm">‹ Prev</button>
+            <span id="as-pos">– / ${stimuli.length}</span>
+            <button id="as-next" class="btn-sm">Next ›</button>
           </div>
-          <div id="disc-preview" class="disc-preview muted"></div>
+          <div id="as-preview" class="disc-preview muted"></div>
           <div class="row" style="margin-top:.7rem">
-            <div><div class="row__label">Release</div>
-              <div class="row__sub">Lets participants tap Continue to move on.</div></div>
+            <div><div class="row__label">Likert scale</div>
+              <div class="row__sub">Reveal the scoring scale under the current figure.</div></div>
             <div style="display:flex;align-items:center;gap:.6rem">
-              <span id="disc-gate-pill" class="pill">…</span>
-              <button id="disc-release" class="btn-sm btn-sm--accent">…</button>
+              <span id="as-likert-pill" class="pill">…</span>
+              <button id="as-likert-toggle" class="btn-sm btn-sm--accent">…</button>
             </div>
           </div>
+          <div id="as-count" class="hint" style="margin-top:.6rem"></div>
+          <p class="hint" style="margin-top:.4rem">Use "Move everyone" below to bring the room into this activity and to move them on when the last figure is done.</p>
+        </div>` : ""}
+
+        ${wc ? `
+        <div class="card" id="wc-card">
+          <h2>Word cloud</h2>
+          <p class="hint">Everyone sees the prompt you pick, with the word input open. Move to the next prompt when the room is done. Live cloud is on the Results tab.</p>
+          <div class="disc-nav">
+            <button id="wc-prev" class="btn-sm">‹ Prev</button>
+            <span id="wc-pos">– / ${wcPrompts.length}</span>
+            <button id="wc-next" class="btn-sm">Next ›</button>
+          </div>
+          <div id="wc-preview" class="disc-preview muted"></div>
+          <div id="wc-count" class="hint" style="margin-top:.6rem"></div>
+          <p class="hint" style="margin-top:.4rem">Use "Move everyone" below to bring the room in and to move them on after the last prompt.</p>
         </div>` : ""}
 
         <div class="card">
@@ -215,7 +233,8 @@ const Control = {
     document.getElementById("signout").addEventListener("click", () => firebase.auth().signOut());
     this.wireSession();
     this.wireGating(gated);
-    this.wireDiscussion();
+    this.wireAssessment();
+    this.wireWordcloud();
     this.wireBackFlags();
     this.wireBroadcast();
     this.wireForceSection();
@@ -245,7 +264,16 @@ const Control = {
       if (!confirm(`Start new workshop "${name}"?\n\nThis sets the session name and re-locks all gates. Existing data is kept (tagged by its session).`)) return;
       const gates = {};
       this.config.sections.filter((s) => s.gate).forEach((s) => { gates[s.id] = "locked"; });
-      await this.db.ref("control").update({ session: name, section_gates: gates, presentation_idx: 0 });
+      const update = { session: name, section_gates: gates };
+      // Reset any host-driven presentation state (assessment figure + scale,
+      // wordcloud prompt index).
+      this.config.sections.filter((s) => s.type === "assessment").forEach((s) => {
+        update[`pres/${s.id}`] = { idx: 0, likert_shown: false };
+      });
+      this.config.sections.filter((s) => s.type === "wordcloud").forEach((s) => {
+        update[`pres/${s.id}`] = { idx: 0 };
+      });
+      await this.db.ref("control").update(update);
       document.getElementById("session-input").value = "";
     });
   },
@@ -264,42 +292,110 @@ const Control = {
     });
   },
 
-  /* ----------------------------- discussion ----------------------------- */
-  wireDiscussion() {
-    const disc = this.config.sections.find((s) => s.type === "discussion");
-    if (!disc) return;
-    const n = (disc.prompts || []).length;
-    const setIdx = (i) => this.db.ref("control/presentation_idx").set(Math.max(0, Math.min(i, Math.max(0, n - 1))));
-    document.getElementById("disc-prev").addEventListener("click", () => setIdx((this.state.presIdx || 0) - 1));
-    document.getElementById("disc-next").addEventListener("click", () => setIdx((this.state.presIdx || 0) + 1));
-    document.getElementById("disc-release").addEventListener("click", () => {
-      const open = this.state.gates[disc.id] === "open";
-      this.db.ref(`control/section_gates/${disc.id}`).set(open ? "locked" : "open");
+  /* ----------------------------- assessment (merged discussion + Likert) ----------------------------- */
+  wireAssessment() {
+    const assess = this.config.sections.find((s) => s.type === "assessment");
+    if (!assess) return;
+    this._assessId = assess.id;
+    const stimuli = assess.stimuli || [];
+    const n = stimuli.length;
+    const presRef = this.db.ref(`control/pres/${assess.id}`);
+
+    // Moving to a figure always hides the scale (write idx + likert_shown:false
+    // together) so the next figure never inherits the previous reveal state.
+    const goTo = (i) => {
+      const idx = Math.max(0, Math.min(i, Math.max(0, n - 1)));
+      presRef.set({ idx, likert_shown: false });
+    };
+    document.getElementById("as-prev").addEventListener("click", () => goTo((this.assessIdx || 0) - 1));
+    document.getElementById("as-next").addEventListener("click", () => goTo((this.assessIdx || 0) + 1));
+    document.getElementById("as-likert-toggle").addEventListener("click", () => {
+      presRef.set({ idx: this.assessIdx || 0, likert_shown: !this.assessLikert });
     });
-    this.paintDiscCard();
+    this.paintAssessCard();
   },
 
-  paintDiscCard() {
-    const disc = this.config.sections.find((s) => s.type === "discussion");
-    if (!disc) return;
-    const prompts = disc.prompts || [];
+  paintAssessCard() {
+    const assess = this.config.sections.find((s) => s.type === "assessment");
+    if (!assess) return;
+    const stimuli = assess.stimuli || [];
+    const n = stimuli.length;
+    const idx = Math.max(0, Math.min(this.assessIdx || 0, Math.max(0, n - 1)));
+    const pos = document.getElementById("as-pos");
+    if (!pos) return;
+    pos.textContent = `${n ? idx + 1 : 0} / ${n}`;
+    const st = stimuli[idx] || {};
+    const prev = document.getElementById("as-preview");
+    prev.textContent = st.title || (st.image ? `[image] ${st.image}` : (st.caption || "(empty)"));
+    const pb = document.getElementById("as-prev");
+    const nb = document.getElementById("as-next");
+    if (pb) pb.disabled = idx <= 0;
+    if (nb) nb.disabled = idx >= n - 1;
+
+    const shown = !!this.assessLikert;
+    const pill = document.getElementById("as-likert-pill");
+    const btn = document.getElementById("as-likert-toggle");
+    if (pill) { pill.textContent = shown ? "SHOWN" : "HIDDEN"; pill.className = "pill " + (shown ? "pill--open" : "pill--locked"); }
+    if (btn) { btn.textContent = shown ? "Hide scale" : "Show scale"; btn.className = "btn-sm " + (shown ? "" : "btn-sm--accent"); }
+
+    // Live submission count for the current figure (informational, not a block).
+    const countEl = document.getElementById("as-count");
+    if (countEl) {
+      const stimId = st.id;
+      const inSession = this.state.participants.filter((p) => (p.session || "") === this.state.session).length;
+      let answered = 0;
+      const assessData = this.results && this.results.assess ? this.results.assess : (this._assessLive || {});
+      Object.keys(assessData || {}).forEach((uid) => {
+        const rec = (assessData[uid] || {})[stimId];
+        if (rec && (rec.session || "") === this.state.session) answered++;
+      });
+      countEl.textContent = stimId ? `Answered this figure: ${answered}${inSession ? " of " + inSession : ""}` : "";
+    }
+  },
+
+  /* ----------------------------- wordcloud (host-paced) ----------------------------- */
+  wireWordcloud() {
+    const wc = this.config.sections.find((s) => s.type === "wordcloud");
+    if (!wc) return;
+    this._wcId = wc.id;
+    const prompts = wc.prompts || [];
     const n = prompts.length;
-    const idx = Math.max(0, Math.min(this.state.presIdx || 0, Math.max(0, n - 1)));
-    const pos = document.getElementById("disc-pos");
-    const prev = document.getElementById("disc-preview");
-    const pb = document.getElementById("disc-prev");
-    const nb = document.getElementById("disc-next");
+    const presRef = this.db.ref(`control/pres/${wc.id}`);
+    const goTo = (i) => presRef.set({ idx: Math.max(0, Math.min(i, Math.max(0, n - 1))) });
+    document.getElementById("wc-prev").addEventListener("click", () => goTo((this.wcIdx || 0) - 1));
+    document.getElementById("wc-next").addEventListener("click", () => goTo((this.wcIdx || 0) + 1));
+    this.paintWcCard();
+  },
+
+  paintWcCard() {
+    const wc = this.config.sections.find((s) => s.type === "wordcloud");
+    if (!wc) return;
+    const prompts = wc.prompts || [];
+    const n = prompts.length;
+    const idx = Math.max(0, Math.min(this.wcIdx || 0, Math.max(0, n - 1)));
+    const pos = document.getElementById("wc-pos");
     if (!pos) return;
     pos.textContent = `${n ? idx + 1 : 0} / ${n}`;
     const p = prompts[idx] || {};
-    prev.textContent = p.text || (p.image ? `[image] ${p.image}` : "(empty)");
+    const prev = document.getElementById("wc-preview");
+    prev.textContent = p.prompt || (p.image ? `[image] ${p.image}` : "(empty)");
+    const pb = document.getElementById("wc-prev");
+    const nb = document.getElementById("wc-next");
     if (pb) pb.disabled = idx <= 0;
     if (nb) nb.disabled = idx >= n - 1;
-    const open = this.state.gates[disc.id] === "open";
-    const pill = document.getElementById("disc-gate-pill");
-    const btn = document.getElementById("disc-release");
-    if (pill) { pill.textContent = open ? "RELEASED" : "SHOWING"; pill.className = "pill " + (open ? "pill--open" : "pill--locked"); }
-    if (btn) { btn.textContent = open ? "Re-hold" : "Release"; btn.className = "btn-sm " + (open ? "" : "btn-sm--accent"); }
+
+    const countEl = document.getElementById("wc-count");
+    if (countEl) {
+      const pid = p.id;
+      const inSession = this.state.participants.filter((x) => (x.session || "") === this.state.session).length;
+      const wordData = (this.results && this.results.words) ? this.results.words : (this._wordLive || {});
+      let answered = 0;
+      Object.keys(wordData || {}).forEach((uid) => {
+        const rec = (wordData[uid] || {})[pid];
+        if (rec && (rec.session || "") === this.state.session) answered++;
+      });
+      countEl.textContent = pid ? `Answered this prompt: ${answered}${inSession ? " of " + inSession : ""}` : "";
+    }
   },
 
   /* --------------------- back-button visibility (questionnaire/end) --------------------- */
@@ -388,20 +484,47 @@ const Control = {
         btn.textContent = open ? "Lock" : "Open";
         btn.className = "btn-sm gate-toggle " + (open ? "" : "btn-sm--accent");
       });
-      this.paintDiscCard();
+      this.paintAssessCard();
+      this.paintWcCard();
       this.renderMonitor();
     });
 
-    this.db.ref("control/presentation_idx").on("value", (s) => {
-      this.state.presIdx = (typeof s.val() === "number") ? s.val() : 0;
-      this.paintDiscCard();
-    });
+    const assess = this.config.sections.find((s) => s.type === "assessment");
+    if (assess) {
+      this.db.ref(`control/pres/${assess.id}`).on("value", (s) => {
+        const v = s.val() || {};
+        this.assessIdx = (typeof v.idx === "number") ? v.idx : 0;
+        this.assessLikert = v.likert_shown === true;
+        this.paintAssessCard();
+      });
+      // Light live feed of assessment answers so the per-figure submission count
+      // updates without opening the Results tab.
+      this.db.ref("assessments").on("value", (s) => {
+        this._assessLive = s.val() || {};
+        this.paintAssessCard();
+      });
+    }
+
+    const wc = this.config.sections.find((s) => s.type === "wordcloud");
+    if (wc) {
+      this.db.ref(`control/pres/${wc.id}`).on("value", (s) => {
+        const v = s.val() || {};
+        this.wcIdx = (typeof v.idx === "number") ? v.idx : 0;
+        this.paintWcCard();
+      });
+      this.db.ref("word_responses").on("value", (s) => {
+        this._wordLive = s.val() || {};
+        this.paintWcCard();
+      });
+    }
 
     this.db.ref("control/broadcast").on("value", (s) => {
       const b = s.val();
       const el = document.getElementById("bc-current");
-      if (el) el.textContent = (b && b.text) ? `Currently showing: "${b.text}"` : "Nothing showing now.";
+      if (el) el.textContent = (b && b.text) ? `Currently showing: "${b.text}"` : (b && b.image ? "Currently showing: a word cloud." : "Nothing showing now.");
     });
+
+    this.watchCleaning();
 
     ["questionnaire", "end"].forEach((key) => {
       this.db.ref(`control/back_${key}`).on("value", (s) => {
@@ -418,6 +541,8 @@ const Control = {
       // live view dirty so the Results tab reflects them on the next 3s tick.
       this._dirty = true;
       this.renderMonitor();
+      this.paintAssessCard();
+      this.paintWcCard();
     });
   },
 
@@ -435,7 +560,7 @@ const Control = {
       if (idx >= sections.length) { done++; return; }
       counts[idx]++;
       const sec = sections[idx];
-      if (this.state.gatingEnabled && sec.gate && sec.type !== "discussion" && this.state.gates[sec.id] !== "open") waiting[idx]++;
+      if (this.state.gatingEnabled && sec.gate && sec.type !== "assessment" && sec.type !== "notice" && sec.type !== "wordcloud" && this.state.gates[sec.id] !== "open") waiting[idx]++;
     });
 
     const rows = sections.map((s, i) => {
@@ -555,10 +680,16 @@ const Control = {
 
   // Word prompts are now word_prompt-typed questions inside questionnaire
   // sections. Collect them per section for the prompt picker.
+  // Sources for the results word clouds: BOTH the self-paced questionnaire
+  // word_prompt questions AND the host-paced wordcloud sections. Both write to
+  // the same word_responses node, so both belong in the prompt picker.
   wordPromptSections() {
     return this.config.sections
-      .filter((s) => s.type === "questionnaire")
-      .map((s) => ({ sec: s, prompts: (s.questions || []).filter((q) => q.type === "word_prompt") }))
+      .map((s) => {
+        if (s.type === "questionnaire") return { sec: s, prompts: (s.questions || []).filter((q) => q.type === "word_prompt") };
+        if (s.type === "wordcloud") return { sec: s, prompts: (s.prompts || []) };
+        return { sec: s, prompts: [] };
+      })
       .filter((e) => e.prompts.length);
   },
 
@@ -578,50 +709,172 @@ const Control = {
     card.innerHTML = `<h2>Word clouds</h2>
       <div class="res-controls">
         <label>Prompt <select id="wc-prompt">${promptOpts}</select></label>
-        <label>Group by <select id="wc-group"><option value="">(none)</option>${fields.map((f) => `<option value="${esc(f.id)}">${esc(f.label || f.id)}</option>`).join("")}</select></label>
+        <label>Group by <select id="wc-group"><option value="">(none)</option>${fields.map((f) => `<option value="${esc(f.id)}">${esc(f.label || f.id)}${f.multi ? " (multi-select)" : ""}</option>`).join("")}</select></label>
         <button id="wc-redraw" class="btn-sm">↻ Redraw</button>
+        <button id="wc-clean" class="btn-sm btn-sm--accent">🧹 Clean words (AI)</button>
+        <button id="wc-export" class="btn-sm">⬇ PNG</button>
+        <button id="wc-export-csv" class="btn-sm">⬇ CSV (raw + processed)</button>
+        <button id="wc-broadcast" class="btn-sm btn-sm--accent">📡 Broadcast to participants</button>
       </div>
-      <div id="wc-area"></div>`;
+      <div id="wc-clean-status" class="hint"></div>
+      <details class="wc-ai-setup">
+        <summary>AI cleaning setup</summary>
+        <div class="wc-ai-setup__body">
+          <label>Provider
+            <select id="wc-ai-provider">
+              <option value="claude">Claude (Anthropic)</option>
+              <option value="gemini">Gemini (Google)</option>
+              <option value="ollama">Ollama (local / open-source)</option>
+            </select>
+          </label>
+          <label>API key <input id="wc-ai-key" type="password" placeholder="paste key (stored only in this browser)" autocomplete="off"></label>
+          <label id="wc-ai-url-wrap" style="display:none">Ollama URL <input id="wc-ai-url" type="text" placeholder="http://localhost:11434"></label>
+          <button id="wc-ai-save" class="btn-sm">Save</button>
+          <span id="wc-ai-saved" class="hint"></span>
+          <div class="hint">The key stays in this browser only (never uploaded). Use a trusted host computer, not a shared one.</div>
+        </div>
+      </details>
+      <div id="wc-broadcast-status" class="hint"></div>
+      <div id="wc-area"></div>
+      <div id="wc-review"></div>`;
     host.appendChild(card);
     const update = () => this.drawClouds(card.querySelector("#wc-prompt").value, card.querySelector("#wc-group").value);
     this._cloudRedraw = update;
     card.querySelector("#wc-prompt").addEventListener("change", update);
     card.querySelector("#wc-group").addEventListener("change", update);
     card.querySelector("#wc-redraw").addEventListener("click", update);
+    card.querySelector("#wc-clean").addEventListener("click", () => this.cleanWords());
+    card.querySelector("#wc-export").addEventListener("click", () => this.exportWordcloudPNG());
+    card.querySelector("#wc-export-csv").addEventListener("click", () => this.exportWordcloudCSV());
+    card.querySelector("#wc-broadcast").addEventListener("click", () => this.broadcastWordcloud());
+    this.wireAiSetup();
     update();
+  },
+
+  /* ----------------------------- AI cleaning setup (host-only, browser-local key) ----------------------------- */
+  aiConfig() {
+    return {
+      provider: localStorage.getItem("RISKVIZ_AI_PROVIDER") || "claude",
+      key: localStorage.getItem("RISKVIZ_AI_KEY") || "",
+      url: localStorage.getItem("RISKVIZ_AI_URL") || "http://localhost:11434"
+    };
+  },
+  wireAiSetup() {
+    const cfg = this.aiConfig();
+    const prov = document.getElementById("wc-ai-provider");
+    const key = document.getElementById("wc-ai-key");
+    const url = document.getElementById("wc-ai-url");
+    const urlWrap = document.getElementById("wc-ai-url-wrap");
+    if (!prov) return;
+    prov.value = cfg.provider; key.value = cfg.key; url.value = cfg.url;
+    const syncUrl = () => { urlWrap.style.display = prov.value === "ollama" ? "" : "none"; };
+    syncUrl();
+    prov.addEventListener("change", syncUrl);
+    document.getElementById("wc-ai-save").addEventListener("click", () => {
+      localStorage.setItem("RISKVIZ_AI_PROVIDER", prov.value);
+      localStorage.setItem("RISKVIZ_AI_KEY", key.value.trim());
+      localStorage.setItem("RISKVIZ_AI_URL", url.value.trim() || "http://localhost:11434");
+      const saved = document.getElementById("wc-ai-saved");
+      if (saved) { saved.textContent = "Saved."; setTimeout(() => { saved.textContent = ""; }, 2000); }
+    });
+  },
+
+  // Which group values a participant belongs to for the chosen attribute. A
+  // single-select attribute yields one value; a multi-select attribute yields
+  // one per selected value, so the participant appears in each of those groups
+  // (overlapping membership — counts can exceed the participant total).
+  groupValuesFor(uid, groupField, labelMap) {
+    if (!groupField) return ["(all)"];
+    const v = ((this.state.participantsRaw[uid] || {}).fields || {})[groupField];
+    const label = (x) => labelMap[x] || x;
+    if (Array.isArray(v)) return v.length ? v.map(label) : ["(not set)"];
+    return [(v != null && v !== "") ? label(v) : "(not set)"];
+  },
+
+  // Apply the active (non-overridden) cleaning decisions for a prompt to a raw
+  // {word: count} map: drop removed terms, fold merged members into their
+  // canonical. Returns a new map; the raw map is untouched.
+  applyCleaning(promptId, rawMap) {
+    const dec = ((this._cleaning || {})[this.viewSession] || {})[promptId];
+    if (!dec) return Object.assign({}, rawMap);
+    const removed = dec.removed || {};
+    const merges = dec.merges || {};
+    const termMap = {};
+    Object.keys(merges).forEach((canon) => {
+      const m = merges[canon] || {};
+      if (m.overridden) return;
+      const split = m.split || {};
+      const members = Array.isArray(m.members) ? m.members : Object.keys(m.members || {});
+      members.forEach((mem) => {
+        if (mem === m.canonical) return;
+        if (split[mem]) return;
+        termMap[mem] = m.canonical;
+      });
+    });
+    const out = {};
+    Object.keys(rawMap).forEach((w) => {
+      const rm = removed[w];
+      if (rm && !rm.overridden) return;         // actively removed
+      const key = termMap[w] || w;              // fold into canonical if merged
+      out[key] = (out[key] || 0) + rawMap[w];
+    });
+    return out;
   },
 
   drawClouds(promptId, groupField) {
     const area = document.getElementById("wc-area"); area.innerHTML = "";
-    const pById = this.state.participantsRaw;
     const labelMap = groupField ? this.attrValueLabels(groupField) : {};
-    const groups = {};
+    const rawGroups = {};
     Object.keys(this.results.words || {}).forEach((uid) => {
       const rec = (this.results.words[uid] || {})[promptId];
       if (!this.sessOK(rec)) return;
-      let g = "(all)";
-      if (groupField) { const v = ((pById[uid] || {}).fields || {})[groupField]; g = (v != null && v !== "") ? (labelMap[v] || v) : "(not set)"; }
-      groups[g] = groups[g] || {};
-      (rec.words || []).forEach((w) => { const k = String(w).toLowerCase(); groups[g][k] = (groups[g][k] || 0) + 1; });
+      this.groupValuesFor(uid, groupField, labelMap).forEach((g) => {
+        rawGroups[g] = rawGroups[g] || {};
+        (rec.words || []).forEach((w) => { const k = String(w).toLowerCase(); rawGroups[g][k] = (rawGroups[g][k] || 0) + 1; });
+      });
     });
+    // Processed groups = raw with active cleaning decisions applied.
+    const groups = {};
+    Object.keys(rawGroups).forEach((g) => { groups[g] = this.applyCleaning(promptId, rawGroups[g]); });
+    // Keep the prompt-level raw + processed term frequencies for CSV export.
+    const rawAll = {}, procAll = {};
+    Object.keys(rawGroups).forEach((g) => Object.entries(rawGroups[g]).forEach(([w, c]) => { rawAll[w] = (rawAll[w] || 0) + c; }));
+    Object.keys(groups).forEach((g) => Object.entries(groups[g]).forEach(([w, c]) => { procAll[w] = (procAll[w] || 0) + c; }));
+    this._wcFreqs = { promptId, raw: rawAll, processed: procAll };
+
     const gkeys = Object.keys(groups).sort();
     this._cloudsDrawn = gkeys.length > 0;
+    // Record rendered canvases for Export PNG / Broadcast (bare clouds — the
+    // canvas holds only the cloud; the group title is a separate DOM element).
+    this._wcRender = { promptId, canvases: [] };
+    // Broadcast is only meaningful for a single cloud; disable it when grouped.
+    const bcBtn = document.getElementById("wc-broadcast");
+    if (bcBtn) {
+      bcBtn.disabled = gkeys.length > 1;
+      bcBtn.title = gkeys.length > 1 ? "Broadcasting sends one cloud — set Group by to (none) first." : "";
+    }
+    this.renderCleaningReview(promptId);
     if (!gkeys.length) { area.innerHTML = "<div class='muted'>No words for this prompt in this session.</div>"; return; }
+    // Render clouds at a high internal resolution (CSS scales them down to fit),
+    // so exported/broadcast images are large and crisp.
+    const RW = 1000, RH = 480;
     gkeys.forEach((g) => {
       const entries = Object.entries(groups[g]).sort((a, b) => b[1] - a[1]).slice(0, 60);
       const total = entries.reduce((a, e) => a + e[1], 0);
       const wrap = document.createElement("div"); wrap.className = "wc-group";
-      wrap.innerHTML = `<div class="wc-title">${esc(g)} · ${total} words</div>`;
+      const title = gkeys.length > 1 || g !== "(all)" ? `${g} · ${total} words` : `${total} words`;
+      wrap.innerHTML = `<div class="wc-title">${esc(title)}</div>`;
       area.appendChild(wrap);
       if (window.WordCloud && entries.length) {
         const canvas = document.createElement("canvas");
-        canvas.width = area.clientWidth || 600; canvas.height = 300; wrap.appendChild(canvas);
+        canvas.width = RW; canvas.height = RH; wrap.appendChild(canvas);
         const maxC = entries[0][1];
         window.WordCloud(canvas, {
-          list: entries, gridSize: 8, weightFactor: (s) => Math.max(12, (s / maxC) * 54),
+          list: entries, gridSize: 12, weightFactor: (s) => Math.max(18, (s / maxC) * 90),
           color: () => ["#0E7C86", "#1A1D21", "#5B6470"][Math.floor(Math.random() * 3)],
           backgroundColor: "#ffffff", rotateRatio: 0.3
         });
+        this._wcRender.canvases.push({ groupKey: g, canvas });
       } else {
         const tbl = document.createElement("div"); tbl.className = "wc-fallback";
         const maxC = entries[0] ? entries[0][1] : 1;
@@ -631,11 +884,294 @@ const Control = {
     });
   },
 
+  _downloadCanvasPNG(canvas, filename) {
+    canvas.toBlob((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    }, "image/png");
+  },
+
+  // Export the current cloud(s) as bare PNG(s): no title, no labels, just the
+  // cloud. One file when ungrouped; one file per group otherwise (the group name
+  // is in the filename so the set stays legible).
+  exportWordcloudPNG() {
+    const r = this._wcRender;
+    if (!r || !r.canvases.length) { alert("No word-cloud image to export yet (draw a cloud first)."); return; }
+    const single = r.canvases.length === 1;
+    r.canvases.forEach((c, i) => {
+      const safe = String(c.groupKey || ("g" + i)).replace(/[^\w-]+/g, "_");
+      const name = single ? `wordcloud_${r.promptId}.png` : `wordcloud_${r.promptId}_${safe}.png`;
+      // Stagger multi-file downloads so the browser doesn't drop them.
+      setTimeout(() => this._downloadCanvasPNG(c.canvas, name), i * 300);
+    });
+  },
+
+  // Broadcast the current single cloud as a bare image to every participant.
+  async broadcastWordcloud() {
+    const status = document.getElementById("wc-broadcast-status");
+    const r = this._wcRender;
+    if (!r || !r.canvases.length) { if (status) status.textContent = "No word-cloud image to broadcast yet."; return; }
+    if (r.canvases.length > 1) { if (status) status.textContent = "Broadcasting sends one cloud — set Group by to (none) first."; return; }
+    const dataUrl = r.canvases[0].canvas.toDataURL("image/png");
+    if (dataUrl.length > 1200000) {
+      if (status) status.textContent = "Image too large to broadcast — try fewer words.";
+      return;
+    }
+    try {
+      await this.db.ref("control/broadcast").set({
+        image: dataUrl,
+        ts: firebase.database.ServerValue.TIMESTAMP
+      });
+      if (status) status.textContent = "Broadcast sent. Use the Broadcast card's Clear to remove it.";
+    } catch (e) {
+      if (status) status.textContent = "Broadcast failed: " + e.message;
+    }
+  },
+
+  /* ----------------------------- AI word cleaning ----------------------------- */
+  // Gather the current prompt's distinct terms + counts (session-scoped, raw).
+  promptTermCounts(promptId) {
+    const counts = {};
+    Object.keys(this.results.words || {}).forEach((uid) => {
+      const rec = (this.results.words[uid] || {})[promptId];
+      if (!this.sessOK(rec)) return;
+      (rec.words || []).forEach((w) => { const k = String(w).toLowerCase().trim(); if (k) counts[k] = (counts[k] || 0) + 1; });
+    });
+    return counts;
+  },
+
+  async cleanWords() {
+    const status = document.getElementById("wc-clean-status");
+    const promptId = document.getElementById("wc-prompt").value;
+    const session = this.viewSession;
+    if (!session || session === "(all)") { if (status) status.textContent = "Pick a single session before cleaning."; return; }
+    const cfg = this.aiConfig();
+    if (cfg.provider !== "ollama" && !cfg.key) { if (status) status.textContent = "Add your API key in 'AI cleaning setup' first."; return; }
+    const counts = this.promptTermCounts(promptId);
+    const terms = Object.keys(counts);
+    if (terms.length < 2) { if (status) status.textContent = "Not enough words to clean yet."; return; }
+    const existing = ((this._cleaning || {})[session] || {})[promptId];
+    if (existing && !confirm("Re-running will replace the current cleaning for this prompt, including any manual reverts. Continue?")) return;
+
+    if (status) status.textContent = `Cleaning ${terms.length} terms with ${cfg.provider}…`;
+    let proposal;
+    try {
+      proposal = await this.aiClean(cfg, terms, counts);
+    } catch (e) {
+      if (status) status.textContent = "Cleaning failed: " + (e.message || e);
+      return;
+    }
+    const decision = this.buildDecision(proposal, counts, cfg.provider);
+    try {
+      await this.db.ref(`control/word_cleaning/${session}/${promptId}`).set(decision);
+      const nrem = Object.keys(decision.removed).length, nmer = Object.keys(decision.merges).length;
+      if (status) status.textContent = `Done: ${nrem} removed, ${nmer} merge group(s). Review below; the cloud now uses the cleaned words.`;
+    } catch (e) {
+      if (status) status.textContent = "Could not save cleaning: " + e.message;
+    }
+  },
+
+  // Turn a validated proposal into the stored decision. Canonical is chosen
+  // deterministically as the highest-count member (ties: first), NOT the model's
+  // pick, so "prefer the more frequent term" always holds.
+  buildDecision(proposal, counts, model) {
+    const removed = {}, merges = {};
+    const used = {};
+    (proposal.removed || []).forEach((r) => {
+      const t = String(r.term || "").toLowerCase().trim();
+      if (t && t in counts && !used[t]) { removed[t] = { reason: String(r.reason || "").slice(0, 120), overridden: false }; used[t] = true; }
+    });
+    (proposal.merges || []).forEach((g) => {
+      const members = (g.members || []).map((m) => String(m).toLowerCase().trim())
+        .filter((m) => m in counts && !used[m]);
+      const uniq = Array.from(new Set(members));
+      if (uniq.length < 2) return;
+      uniq.forEach((m) => { used[m] = true; });
+      const canonical = uniq.slice().sort((a, b) => (counts[b] - counts[a]) || (a < b ? -1 : 1))[0];
+      const memObj = {}; uniq.forEach((m) => { memObj[m] = true; });
+      merges[canonical] = { canonical, members: memObj, split: {}, overridden: false };
+    });
+    return { ts: firebase.database.ServerValue.TIMESTAMP, model, removed, merges };
+  },
+
+  // Provider dispatch. All return { removed:[{term,reason}], merges:[{members:[...]}] }.
+  async aiClean(cfg, terms, counts) {
+    const sys = "You clean a list of short words/phrases from a workshop word-cloud. "
+      + "Return ONLY JSON: {\"removed\":[{\"term\":\"\",\"reason\":\"\"}],\"merges\":[{\"members\":[\"\",\"\"]}]}. "
+      + "removed = gibberish/nonsense (e.g. random letters) only; do NOT remove real words. "
+      + "merges = groups of terms that mean the same thing or are minor typos of each other "
+      + "(e.g. tv/television, televsion/television). Only group clear synonyms or typos, not merely related words. "
+      + "Every term/member must be copied verbatim from the input list. Output nothing but the JSON.";
+    const payload = terms.map((t) => `${t} (${counts[t]})`).join(", ");
+    const user = "Terms with counts:\n" + payload;
+    let text;
+    if (cfg.provider === "claude") text = await this._callClaude(cfg.key, sys, user);
+    else if (cfg.provider === "gemini") text = await this._callGemini(cfg.key, sys, user);
+    else text = await this._callOllama(cfg.url, sys, user);
+    return this._parseProposal(text, terms);
+  },
+
+  async _callClaude(key, sys, user) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5", max_tokens: 1500,
+        system: sys, messages: [{ role: "user", content: user }]
+      })
+    });
+    if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    const data = await res.json();
+    return (data.content || []).map((b) => b.text || "").join("");
+  },
+
+  async _callGemini(key, sys, user) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`;
+    const res = await fetch(url, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: sys }] },
+        contents: [{ role: "user", parts: [{ text: user }] }],
+        generationConfig: { responseMimeType: "application/json" }
+      })
+    });
+    if (!res.ok) throw new Error(`Gemini API ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    const data = await res.json();
+    return ((((data.candidates || [])[0] || {}).content || {}).parts || []).map((p) => p.text || "").join("");
+  },
+
+  async _callOllama(baseUrl, sys, user) {
+    const res = await fetch(`${(baseUrl || "").replace(/\/$/, "")}/api/chat`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "llama3.1", stream: false, format: "json",
+        messages: [{ role: "system", content: sys }, { role: "user", content: user }]
+      })
+    });
+    if (!res.ok) throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    const data = await res.json();
+    return (data.message || {}).content || "";
+  },
+
+  // Parse + strictly validate the model output. Anything malformed is dropped
+  // rather than trusted; members must be verbatim input terms.
+  _parseProposal(text, terms) {
+    const termSet = new Set(terms);
+    let obj;
+    try {
+      const m = String(text).match(/\{[\s\S]*\}/);
+      obj = JSON.parse(m ? m[0] : text);
+    } catch (e) { throw new Error("Model did not return valid JSON."); }
+    const removed = Array.isArray(obj.removed) ? obj.removed
+      .map((r) => ({ term: String((r && r.term) || "").toLowerCase().trim(), reason: String((r && r.reason) || "") }))
+      .filter((r) => termSet.has(r.term)) : [];
+    const merges = Array.isArray(obj.merges) ? obj.merges
+      .map((g) => ({ members: (Array.isArray(g && g.members) ? g.members : []).map((m) => String(m).toLowerCase().trim()).filter((m) => termSet.has(m)) }))
+      .filter((g) => g.members.length >= 2) : [];
+    return { removed, merges };
+  },
+
+  // Live decisions listener → keep this._cleaning fresh and redraw.
+  watchCleaning() {
+    if (this._cleaningRef) return;
+    this._cleaningRef = this.db.ref("control/word_cleaning");
+    this._cleaningRef.on("value", (s) => {
+      this._cleaning = s.val() || {};
+      if (this._cloudRedraw && document.getElementById("wc-area")) this._cloudRedraw();
+    });
+  },
+
+  // Write a single override flag (revert / re-apply), path-scoped so it never
+  // touches raw data.
+  async _setCleaningFlag(promptId, path, value) {
+    const session = this.viewSession;
+    if (!session || session === "(all)") return;
+    await this.db.ref(`control/word_cleaning/${session}/${promptId}/${path}`).set(value);
+  },
+
+  renderCleaningReview(promptId) {
+    const el = document.getElementById("wc-review");
+    if (!el) return;
+    const dec = ((this._cleaning || {})[this.viewSession] || {})[promptId];
+    if (!dec || (!Object.keys(dec.removed || {}).length && !Object.keys(dec.merges || {}).length)) {
+      el.innerHTML = "";
+      return;
+    }
+    const removed = dec.removed || {}, merges = dec.merges || {};
+    const remRows = Object.keys(removed).sort().map((t) => {
+      const r = removed[t];
+      return `<div class="wc-rev__row ${r.overridden ? "wc-rev__row--off" : ""}">
+        <span class="wc-rev__term">${esc(t)}</span>
+        <span class="wc-rev__reason">${esc(r.reason || "removed")}</span>
+        <button class="btn-sm wc-rev-remove" data-term="${esc(t)}" data-to="${r.overridden ? "1" : "0"}">${r.overridden ? "Remove again" : "Put back"}</button>
+      </div>`;
+    }).join("");
+    const merRows = Object.keys(merges).sort().map((canon) => {
+      const m = merges[canon];
+      const members = Array.isArray(m.members) ? m.members : Object.keys(m.members || {});
+      const split = m.split || {};
+      const memHTML = members.map((mem) => {
+        if (mem === m.canonical) return `<span class="wc-rev__canon">${esc(mem)}</span>`;
+        const isSplit = !!split[mem];
+        return `<span class="wc-rev__mem ${isSplit ? "wc-rev__mem--split" : ""}">${esc(mem)}
+          <button class="btn-sm wc-rev-split" data-canon="${esc(canon)}" data-mem="${esc(mem)}" data-to="${isSplit ? "0" : "1"}">${isSplit ? "re-merge" : "split"}</button>
+        </span>`;
+      }).join(" ");
+      return `<div class="wc-rev__row ${m.overridden ? "wc-rev__row--off" : ""}">
+        <span class="wc-rev__group">→ ${esc(m.canonical)}: ${memHTML}</span>
+        <button class="btn-sm wc-rev-group" data-canon="${esc(canon)}" data-to="${m.overridden ? "0" : "1"}">${m.overridden ? "redo group" : "undo group"}</button>
+      </div>`;
+    }).join("");
+
+    el.innerHTML = `<div class="wc-review">
+      <div class="wc-review__h">AI cleaning — <span class="muted">${esc(dec.model || "")}</span> · you can revert anything</div>
+      ${remRows ? `<div class="wc-review__sec"><div class="wc-review__t">Removed</div>${remRows}</div>` : ""}
+      ${merRows ? `<div class="wc-review__sec"><div class="wc-review__t">Merged</div>${merRows}</div>` : ""}
+    </div>`;
+
+    el.querySelectorAll(".wc-rev-remove").forEach((b) =>
+      b.addEventListener("click", () => this._setCleaningFlag(promptId, `removed/${b.dataset.term}/overridden`, b.dataset.to === "1")));
+    el.querySelectorAll(".wc-rev-group").forEach((b) =>
+      b.addEventListener("click", () => this._setCleaningFlag(promptId, `merges/${b.dataset.canon}/overridden`, b.dataset.to === "1")));
+    el.querySelectorAll(".wc-rev-split").forEach((b) =>
+      b.addEventListener("click", () => this._setCleaningFlag(promptId, `merges/${b.dataset.canon}/split/${b.dataset.mem}`, b.dataset.to === "1" ? true : null)));
+  },
+
+  _downloadCSV(rows, filename) {
+    const csv = rows.map((r) => r.map((c) => {
+      const s = String(c == null ? "" : c);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    }).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  },
+
+  // Export raw and processed term-frequency CSVs for the current prompt.
+  exportWordcloudCSV() {
+    const f = this._wcFreqs;
+    const status = document.getElementById("wc-clean-status");
+    if (!f) { if (status) status.textContent = "Draw a cloud first."; return; }
+    const toRows = (map) => [["word", "count"]].concat(
+      Object.entries(map).sort((a, b) => b[1] - a[1]).map(([w, c]) => [w, c]));
+    this._downloadCSV(toRows(f.raw), `words_raw_${f.promptId}.csv`);
+    setTimeout(() => this._downloadCSV(toRows(f.processed), `words_processed_${f.promptId}.csv`), 300);
+  },
+
   renderLikert(host) {
     const dims = (this.config.likert.dimensions || []);
     const points = this.config.likert.points || 5;
     const stimTitles = {};
-    this.config.sections.filter((s) => s.type === "likert").forEach((s) => (s.stimuli || []).forEach((st) => { stimTitles[st.id] = st.title || st.id; }));
+    this.config.sections.filter((s) => s.type === "assessment").forEach((s) => (s.stimuli || []).forEach((st) => { stimTitles[st.id] = st.title || st.id; }));
     const agg = {};
     Object.keys(this.results.assess || {}).forEach((uid) => {
       const stims = this.results.assess[uid] || {};
@@ -694,19 +1230,42 @@ const Control = {
 
     const data = this.results.choices || {};
     const blocks = questions.map((q) => {
-      const C = (q.choices || []).length;
+      const rawChoices = q.choices || [];
+      const C = rawChoices.length;
       const slots = C + (q.has_other ? 1 : 0);   // "Other" slot lives at index C
       const counts = new Array(slots).fill(0);
       let respondents = 0;
       const others = [];
-      Object.keys(data).forEach((uid) => {
-        const rec = (data[uid] || {})[q.id];
-        if (!rec || !this.sessOK(rec)) return;
-        respondents++;
-        this.selectedIdxs(rec).forEach((i) => { if (i >= 0 && i < slots) counts[i]++; });
-        const ot = (rec.other_text || "").trim();
-        if (ot) others.push({ who: who(uid), text: ot });
-      });
+
+      if (q.profile) {
+        // Profile answers live in participants/{uid}/fields/{qid} as the option
+        // text (string) or an array of texts (multi) — NOT in the choices node.
+        // Map each value back to its option bar; values that aren't among the
+        // options are typed "Other" (route to the Other bar + verbatim list).
+        const idxOf = {};
+        rawChoices.forEach((c, i) => { idxOf[ConfigLoader.stripMarkup(c)] = i; });
+        Object.keys(pById).forEach((uid) => {
+          const p = pById[uid] || {};
+          if (!this.sessOK(p)) return;                 // participant's own session
+          const fv = (p.fields || {})[q.id];
+          if (fv === undefined || fv === null || fv === "") return;
+          respondents++;
+          (Array.isArray(fv) ? fv : [fv]).forEach((v) => {
+            const key = String(v);
+            if (key in idxOf) counts[idxOf[key]]++;
+            else if (q.has_other) { counts[C]++; others.push({ who: who(uid), text: key }); }
+          });
+        });
+      } else {
+        Object.keys(data).forEach((uid) => {
+          const rec = (data[uid] || {})[q.id];
+          if (!rec || !this.sessOK(rec)) return;
+          respondents++;
+          this.selectedIdxs(rec).forEach((i) => { if (i >= 0 && i < slots) counts[i]++; });
+          const ot = (rec.other_text || "").trim();
+          if (ot) others.push({ who: who(uid), text: ot });
+        });
+      }
 
       const max = Math.max(0, ...counts);
       const labels = (q.choices || []).slice();
@@ -749,7 +1308,8 @@ const Control = {
       const p = pById[uid] || {};
       const row = { uid, participant_no: p.participant_no || "", session: p.session,
                     section_idx: (p.progress || {}).section_idx, created_at: p.created_at, fields_ts: p.fields_ts };
-      fieldIds.forEach((f) => { row[f] = (p.fields || {})[f]; }); return row;
+      fieldIds.forEach((f) => { const v = (p.fields || {})[f]; row[f] = Array.isArray(v) ? v.join(";") : v; });
+      return row;
     }).filter((r) => this.sessOK(r));
 
     const words = [];

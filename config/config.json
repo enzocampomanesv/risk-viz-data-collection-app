@@ -17,20 +17,16 @@
   "likert": {
     "dimensions": [
       {
-        "id": "comprehension",
-        "label": "How easy is this to understand?"
+        "id": "clarity",
+        "label": "Clarity: Do you think this is easy to understand?"
       },
       {
         "id": "usefulness",
-        "label": "How useful is this for you?"
-      },
-      {
-        "id": "access",
-        "label": "How easy would this be to access?"
+        "label": "Usefulness: Would this help you prepare for or respond to flooding?"
       },
       {
         "id": "trust",
-        "label": "How much would you trust this?"
+        "label": "Trust: Do you trust this?"
       }
     ]
   },
@@ -42,36 +38,59 @@
       "gate": false
     },
     {
-      "id": "registration",
-      "type": "registration",
+      "id": "profile",
+      "type": "questionnaire",
       "orientation": "portrait",
-      "gate": false
+      "gate": false,
+      "label": "About you"
     },
     {
-      "id": "words",
+      "id": "wordcloud",
+      "type": "wordcloud",
+      "orientation": "portrait",
+      "gate": true,
+      "label": "Word cloud"
+    },
+    {
+      "id": "completion1",
+      "type": "notice",
+      "orientation": "portrait",
+      "gate": true,
+      "label": "Session one done",
+      "title_key": "notice_completion1_title",
+      "body_key": "notice_completion1_body"
+    },
+    {
+      "id": "welcome_back",
+      "type": "notice",
+      "orientation": "portrait",
+      "gate": true,
+      "label": "Welcome back",
+      "title_key": "notice_welcome_title",
+      "body_key": "notice_welcome_body"
+    },
+    {
+      "id": "questions",
       "type": "questionnaire",
       "orientation": "portrait",
       "gate": true,
-      "label": "Current flood information"
+      "label": "Flood experience & information"
     },
     {
-      "id": "discussion",
-      "type": "discussion",
-      "orientation": "portrait",
-      "gate": true
-    },
-    {
-      "id": "assess",
-      "type": "likert",
-      "orientation": "portrait",
-      "gate": true
-    },
-    {
-      "id": "words_future",
-      "type": "questionnaire",
+      "id": "completion2",
+      "type": "notice",
       "orientation": "portrait",
       "gate": true,
-      "label": "Future / ideal flood information"
+      "label": "Assessment next",
+      "title_key": "notice_completion2_title",
+      "body_key": "notice_completion2_body"
+    },
+    {
+      "id": "assessment",
+      "type": "assessment",
+      "orientation": "portrait",
+      "gate": true,
+      "label": "Format assessment"
     }
   ]
 }

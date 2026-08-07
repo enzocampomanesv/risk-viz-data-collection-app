@@ -63,4 +63,4 @@ firebase deploy --only hosting    # or: firebase serve  (local test)
 - If any are red, the details box says exactly what's missing.
 
 When all three are green, Phase 1 is done and I'll start Phase 2
-(consent + config-driven registration + resume).
+(consent + the config-driven questionnaire + resume).

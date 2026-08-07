@@ -71,7 +71,7 @@
 
 .wc-group { margin-bottom: 1rem; }
 .wc-title { font-weight: 600; font-size: 0.85rem; color: var(--color-muted); margin-bottom: 0.3rem; }
-.wc-group canvas { width: 100%; border: 1px solid var(--color-border); border-radius: 8px; }
+.wc-group canvas { width: 100%; height: auto; border: 1px solid var(--color-border); border-radius: 8px; }
 .wc-fallback { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; align-items: baseline; line-height: 1.6; }
 
 .res-table table { width: 100%; border-collapse: collapse; }
@@ -133,3 +133,26 @@
 .poll-other { font-size: 0.85rem; padding: 0.25rem 0; border-top: 1px solid var(--color-border); }
 .poll-other:first-of-type { border-top: none; }
 .poll-other code { color: var(--color-muted); margin-right: 0.4rem; }
+
+/* ---- AI word cleaning: setup + review ---- */
+.wc-ai-setup { margin: 0.4rem 0; font-size: 0.85rem; }
+.wc-ai-setup summary { cursor: pointer; color: var(--color-muted); }
+.wc-ai-setup__body { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 0.5rem; padding: 0.6rem; border: 1px solid var(--color-border); border-radius: 8px; }
+.wc-ai-setup__body label { display: flex; flex-direction: column; font-size: 0.78rem; gap: 0.2rem; }
+.wc-ai-setup__body input { min-width: 240px; }
+.wc-ai-setup__body .hint { flex-basis: 100%; }
+
+.wc-review { margin-top: 0.8rem; padding: 0.7rem 0.8rem; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); }
+.wc-review__h { font-size: 0.82rem; font-weight: 600; margin-bottom: 0.5rem; }
+.wc-review__sec { margin-bottom: 0.5rem; }
+.wc-review__t { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-muted); margin-bottom: 0.25rem; }
+.wc-rev__row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 0.3rem 0; border-top: 1px solid var(--color-border); }
+.wc-rev__row:first-child { border-top: none; }
+.wc-rev__row--off { opacity: 0.5; }
+.wc-rev__term { font-weight: 600; }
+.wc-rev__reason { color: var(--color-muted); font-size: 0.8rem; flex: 1 1 auto; }
+.wc-rev__group { flex: 1 1 auto; font-size: 0.85rem; }
+.wc-rev__canon { font-weight: 600; }
+.wc-rev__mem { margin-left: 0.3rem; }
+.wc-rev__mem--split { text-decoration: line-through; opacity: 0.6; }
+.wc-rev__mem .btn-sm, .wc-rev__row .btn-sm { padding: 0.1rem 0.4rem; font-size: 0.72rem; }
