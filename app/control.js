@@ -114,11 +114,12 @@ const Control = {
         </div>
 
         <div class="ctrl-tabs">
-          <button id="tabbtn-control" class="ctrl-tab ctrl-tab--on">Control</button>
+          <button id="tabbtn-setup" class="ctrl-tab">Setup</button>
+          <button id="tabbtn-run" class="ctrl-tab ctrl-tab--on">Run</button>
           <button id="tabbtn-results" class="ctrl-tab">Results</button>
         </div>
 
-        <div id="tab-control">
+        <div id="tab-setup" style="display:none">
         <div class="card">
           <h2>Workshop session</h2>
           <p class="hint">Current: <strong id="cur-session">…</strong></p>
@@ -150,6 +151,61 @@ const Control = {
           </div>`).join("")}
         </div>
 
+        <div class="card">
+          <h2>Back button visibility</h2>
+          <p class="hint">These three screens hide Back by default. Switch each on independently if you want participants able to return.</p>
+          ${BACK_TOGGLES.map((t) => `
+          <div class="row" data-backflag="${t.key}">
+            <div><div class="row__label">${esc(t.label)}</div>
+              <div class="row__sub">${esc(t.sub)}</div></div>
+            <div style="display:flex;align-items:center;gap:.6rem">
+              <span class="pill backflag-pill">…</span>
+              <button class="btn-sm backflag-toggle">…</button>
+            </div>
+          </div>`).join("")}
+        </div>
+        </div><!-- /tab-setup -->
+
+        <div id="tab-run">
+        <div class="card">
+          <h2>Live participation &amp; broadcast</h2>
+          <p class="hint">Participants in the current session, by where they are now.</p>
+          <div id="monitor" class="monitor"><div class="muted">Loading…</div></div>
+          <div class="bc-block">
+            <div class="row__label" style="margin-top:.9rem">Broadcast message</div>
+            <p class="hint">Shows as a banner on every participant's screen until cleared.</p>
+            <div class="field"><textarea id="bc-text" placeholder="e.g. Please put your phones down and look up."></textarea></div>
+            <div style="display:flex;gap:.5rem;margin-top:.6rem">
+              <button id="bc-send" class="btn-sm btn-sm--accent">Send</button>
+              <button id="bc-clear" class="btn-sm">Clear</button>
+            </div>
+            <p class="hint" id="bc-current" style="margin-top:.6rem"></p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Move everyone</h2>
+          <p class="hint">Jumps every connected participant in this session to the chosen section now. Saved answers are kept — this only changes which screen they're on. Use sparingly.</p>
+          <div class="field">
+            <select id="force-section-select">${this.config.sections.map((s) => `<option value="${esc(s.id)}">${esc(labelFor(s))} (${esc(s.id)})</option>`).join("")}</select>
+            <button id="force-section-go" class="btn-sm btn-sm--danger">Move everyone here</button>
+          </div>
+        </div>
+
+        ${wc ? `
+        <div class="card" id="wc-card">
+          <h2>Word cloud</h2>
+          <p class="hint">Everyone sees the prompt you pick, with the word input open. Move to the next prompt when the room is done. The live cloud is on the Results tab.</p>
+          <div class="disc-nav">
+            <button id="wc-prev" class="btn-sm">‹ Prev</button>
+            <span id="wc-pos">– / ${wcPrompts.length}</span>
+            <button id="wc-next" class="btn-sm">Next ›</button>
+          </div>
+          <div id="wc-preview" class="disc-preview muted"></div>
+          <div id="wc-count" class="hint" style="margin-top:.6rem"></div>
+          <p class="hint" style="margin-top:.4rem">Use "Move everyone" above to bring the room in and to move them on after the last prompt.</p>
+        </div>` : ""}
+
         ${assess ? `
         <div class="card" id="assess-card">
           <h2>Format assessment</h2>
@@ -169,63 +225,9 @@ const Control = {
             </div>
           </div>
           <div id="as-count" class="hint" style="margin-top:.6rem"></div>
-          <p class="hint" style="margin-top:.4rem">Use "Move everyone" below to bring the room into this activity and to move them on when the last figure is done.</p>
+          <p class="hint" style="margin-top:.4rem">Use "Move everyone" above to bring the room into this activity and to move them on when the last figure is done.</p>
         </div>` : ""}
-
-        ${wc ? `
-        <div class="card" id="wc-card">
-          <h2>Word cloud</h2>
-          <p class="hint">Everyone sees the prompt you pick, with the word input open. Move to the next prompt when the room is done. Live cloud is on the Results tab.</p>
-          <div class="disc-nav">
-            <button id="wc-prev" class="btn-sm">‹ Prev</button>
-            <span id="wc-pos">– / ${wcPrompts.length}</span>
-            <button id="wc-next" class="btn-sm">Next ›</button>
-          </div>
-          <div id="wc-preview" class="disc-preview muted"></div>
-          <div id="wc-count" class="hint" style="margin-top:.6rem"></div>
-          <p class="hint" style="margin-top:.4rem">Use "Move everyone" below to bring the room in and to move them on after the last prompt.</p>
-        </div>` : ""}
-
-        <div class="card">
-          <h2>Back button visibility</h2>
-          <p class="hint">These three screens hide Back by default. Switch each on independently if you want participants able to return.</p>
-          ${BACK_TOGGLES.map((t) => `
-          <div class="row" data-backflag="${t.key}">
-            <div><div class="row__label">${esc(t.label)}</div>
-              <div class="row__sub">${esc(t.sub)}</div></div>
-            <div style="display:flex;align-items:center;gap:.6rem">
-              <span class="pill backflag-pill">…</span>
-              <button class="btn-sm backflag-toggle">…</button>
-            </div>
-          </div>`).join("")}
-        </div>
-
-        <div class="card">
-          <h2>Live participation</h2>
-          <p class="hint">Participants in the current session, by where they are now.</p>
-          <div id="monitor" class="monitor"><div class="muted">Loading…</div></div>
-        </div>
-
-        <div class="card">
-          <h2>Move everyone</h2>
-          <p class="hint">Jumps every connected participant in this session to the chosen section now. Saved answers are kept — this only changes which screen they're on. Use sparingly.</p>
-          <div class="field">
-            <select id="force-section-select">${this.config.sections.map((s) => `<option value="${esc(s.id)}">${esc(labelFor(s))} (${esc(s.id)})</option>`).join("")}</select>
-            <button id="force-section-go" class="btn-sm btn-sm--danger">Move everyone here</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>Broadcast message</h2>
-          <p class="hint">Shows as a banner on every participant's screen until cleared.</p>
-          <div class="field"><textarea id="bc-text" placeholder="e.g. Please put your phones down and look up."></textarea></div>
-          <div style="display:flex;gap:.5rem;margin-top:.6rem">
-            <button id="bc-send" class="btn-sm btn-sm--accent">Send</button>
-            <button id="bc-clear" class="btn-sm">Clear</button>
-          </div>
-          <p class="hint" id="bc-current" style="margin-top:.6rem"></p>
-        </div>
-        </div><!-- /tab-control -->
+        </div><!-- /tab-run -->
 
         <div id="tab-results" style="display:none"></div>
       </div>`;
@@ -239,21 +241,51 @@ const Control = {
     this.wireBroadcast();
     this.wireForceSection();
     this.wireTabs();
+    this.wireCollapsible();
     this.subscribe(gated);
   },
 
+  // Make every card collapsible by clicking its <h2>. Collapse state is keyed by
+  // the header text, defaults to collapsed (so a fresh load shows just titles),
+  // and persists across reloads in localStorage. A card the host has explicitly
+  // toggled keeps that choice; only not-yet-seen cards use the collapsed default.
+  _loadCollapsed() {
+    if (this._collapsed) return this._collapsed;
+    try { this._collapsed = JSON.parse(localStorage.getItem("RISKVIZ_CARD_COLLAPSED") || "{}") || {}; }
+    catch (e) { this._collapsed = {}; }
+    return this._collapsed;
+  },
+  wireCollapsible(root) {
+    const state = this._loadCollapsed();
+    (root || document).querySelectorAll(".card > h2").forEach((h) => {
+      const card = h.parentElement;
+      const key = (h.textContent || "").trim();
+      // Unseen card → default collapsed; seen card → its remembered state.
+      const collapsed = (key in state) ? state[key] : true;
+      card.classList.toggle("card--collapsed", collapsed);
+      if (h._collapWired) return;
+      h._collapWired = true;
+      h.addEventListener("click", () => {
+        const now = card.classList.toggle("card--collapsed");
+        state[key] = now;
+        try { localStorage.setItem("RISKVIZ_CARD_COLLAPSED", JSON.stringify(state)); } catch (e) { /* ignore */ }
+      });
+    });
+  },
+
   wireTabs() {
+    const tabs = ["setup", "run", "results"];
     const show = (tab) => {
       this.tab = tab;
-      document.getElementById("tab-control").style.display = tab === "control" ? "" : "none";
-      document.getElementById("tab-results").style.display = tab === "results" ? "" : "none";
-      document.getElementById("tabbtn-control").classList.toggle("ctrl-tab--on", tab === "control");
-      document.getElementById("tabbtn-results").classList.toggle("ctrl-tab--on", tab === "results");
+      tabs.forEach((t) => {
+        document.getElementById("tab-" + t).style.display = (t === tab) ? "" : "none";
+        document.getElementById("tabbtn-" + t).classList.toggle("ctrl-tab--on", t === tab);
+      });
       if (tab === "results") this.loadResults();
       else this.stopLive();
     };
-    document.getElementById("tabbtn-control").addEventListener("click", () => show("control"));
-    document.getElementById("tabbtn-results").addEventListener("click", () => show("results"));
+    tabs.forEach((t) => document.getElementById("tabbtn-" + t).addEventListener("click", () => show(t)));
+    show("run");   // default to the live facilitation view
   },
 
   /* ----------------------------- session ----------------------------- */
@@ -636,9 +668,23 @@ const Control = {
         <button id="live-pause" class="btn-sm">Pause</button>
       </div>
       <p class="hint" style="margin:.2rem 0 .7rem">Choice results &amp; Likert update every 3s; word clouds update when you change a filter or press Redraw. Viewing a past session shows static history. The Python dashboard remains the home for SQLite export.</p>
-      <div id="r-words"></div><div id="r-likert"></div>
-      <div id="r-choice"></div>
-      <div id="r-export"></div>`;
+      <div class="ctrl-subtabs">
+        <button id="rsub-words" class="ctrl-subtab ctrl-subtab--on">Word clouds</button>
+        <button id="rsub-likert" class="ctrl-subtab">Likert</button>
+        <button id="rsub-choice" class="ctrl-subtab">Questionnaire</button>
+        <button id="rsub-export" class="ctrl-subtab">Export</button>
+      </div>
+      <div id="r-words"></div>
+      <div id="r-likert" style="display:none"></div>
+      <div id="r-choice" style="display:none"></div>
+      <div id="r-export" style="display:none"></div>`;
+    const rsubs = ["words", "likert", "choice", "export"];
+    rsubs.forEach((n) => document.getElementById("rsub-" + n).addEventListener("click", () => {
+      rsubs.forEach((m) => {
+        document.getElementById("r-" + m).style.display = (m === n) ? "" : "none";
+        document.getElementById("rsub-" + m).classList.toggle("ctrl-subtab--on", m === n);
+      });
+    }));
     document.getElementById("live-pause").addEventListener("click", (e) => {
       this._paused = !this._paused;
       e.target.textContent = this._paused ? "Resume" : "Pause";
@@ -654,6 +700,7 @@ const Control = {
     });
     this.renderWordResults(document.getElementById("r-words"));
     this.updateLiveBar();
+    this.wireCollapsible(document.getElementById("tab-results"));
   },
 
   updateLiveBar() {
@@ -676,6 +723,7 @@ const Control = {
     this.renderQuestionnaireResults(document.getElementById("r-choice"));
     this.renderExport(document.getElementById("r-export"));
     this.updateLiveBar();
+    this.wireCollapsible(document.getElementById("tab-results"));
   },
 
   // Word prompts are now word_prompt-typed questions inside questionnaire
@@ -720,18 +768,14 @@ const Control = {
       <details class="wc-ai-setup">
         <summary>AI cleaning setup</summary>
         <div class="wc-ai-setup__body">
-          <label>Provider
-            <select id="wc-ai-provider">
-              <option value="claude">Claude (Anthropic)</option>
-              <option value="gemini">Gemini (Google)</option>
-              <option value="ollama">Ollama (local / open-source)</option>
-            </select>
-          </label>
+          <div class="hint" style="flex-basis:100%">Provider: <b>Gemini (Google)</b>. Cleaning runs from this browser using your key.</div>
+          <label>Model <input id="wc-ai-model" type="text" placeholder="(default)" autocomplete="off"></label>
           <label>API key <input id="wc-ai-key" type="password" placeholder="paste key (stored only in this browser)" autocomplete="off"></label>
-          <label id="wc-ai-url-wrap" style="display:none">Ollama URL <input id="wc-ai-url" type="text" placeholder="http://localhost:11434"></label>
           <button id="wc-ai-save" class="btn-sm">Save</button>
+          <button id="wc-ai-check" class="btn-sm">Check models</button>
           <span id="wc-ai-saved" class="hint"></span>
-          <div class="hint">The key stays in this browser only (never uploaded). Use a trusted host computer, not a shared one.</div>
+          <div class="hint">The key stays in this browser only, never uploaded. Use a trusted host computer, not a shared one. The Model box is used as typed (no need to Save first); Save just remembers it for next time.</div>
+          <div id="wc-ai-models" class="hint" style="flex-basis:100%"></div>
         </div>
       </details>
       <div id="wc-broadcast-status" class="hint"></div>
@@ -752,31 +796,65 @@ const Control = {
   },
 
   /* ----------------------------- AI cleaning setup (host-only, browser-local key) ----------------------------- */
+  aiDefaultModel() {
+    // Google is retiring the 2.5 flash line for new keys; 3.x flash is the
+    // current default. Use "Check models" to see exactly what your key allows.
+    return "gemini-3.6-flash";
+  },
+  // Read the live fields first (so what's typed is used immediately, no Save
+  // needed), then fall back to the saved value, then the default.
   aiConfig() {
-    return {
-      provider: localStorage.getItem("RISKVIZ_AI_PROVIDER") || "claude",
-      key: localStorage.getItem("RISKVIZ_AI_KEY") || "",
-      url: localStorage.getItem("RISKVIZ_AI_URL") || "http://localhost:11434"
-    };
+    const modelEl = document.getElementById("wc-ai-model");
+    const keyEl = document.getElementById("wc-ai-key");
+    const liveModel = modelEl ? modelEl.value.trim() : "";
+    const liveKey = keyEl ? keyEl.value.trim() : "";
+    const model = liveModel || (localStorage.getItem("RISKVIZ_AI_MODEL") || "").trim() || this.aiDefaultModel();
+    const key = liveKey || localStorage.getItem("RISKVIZ_AI_KEY") || "";
+    return { provider: "gemini", key, model };
   },
   wireAiSetup() {
-    const cfg = this.aiConfig();
-    const prov = document.getElementById("wc-ai-provider");
     const key = document.getElementById("wc-ai-key");
-    const url = document.getElementById("wc-ai-url");
-    const urlWrap = document.getElementById("wc-ai-url-wrap");
-    if (!prov) return;
-    prov.value = cfg.provider; key.value = cfg.key; url.value = cfg.url;
-    const syncUrl = () => { urlWrap.style.display = prov.value === "ollama" ? "" : "none"; };
-    syncUrl();
-    prov.addEventListener("change", syncUrl);
+    const model = document.getElementById("wc-ai-model");
+    if (!model) return;
+    key.value = localStorage.getItem("RISKVIZ_AI_KEY") || "";
+    model.value = (localStorage.getItem("RISKVIZ_AI_MODEL") || "").trim();
+    model.placeholder = `(default: ${this.aiDefaultModel()})`;
     document.getElementById("wc-ai-save").addEventListener("click", () => {
-      localStorage.setItem("RISKVIZ_AI_PROVIDER", prov.value);
       localStorage.setItem("RISKVIZ_AI_KEY", key.value.trim());
-      localStorage.setItem("RISKVIZ_AI_URL", url.value.trim() || "http://localhost:11434");
+      localStorage.setItem("RISKVIZ_AI_MODEL", model.value.trim());
       const saved = document.getElementById("wc-ai-saved");
       if (saved) { saved.textContent = "Saved."; setTimeout(() => { saved.textContent = ""; }, 2000); }
     });
+    document.getElementById("wc-ai-check").addEventListener("click", () => this.checkModels());
+  },
+
+  // List the models this key can actually call (definitive, per-account), and
+  // let the host click one to fill the Model field.
+  async checkModels() {
+    const out = document.getElementById("wc-ai-models");
+    const keyEl = document.getElementById("wc-ai-key");
+    const key = (keyEl ? keyEl.value.trim() : "") || localStorage.getItem("RISKVIZ_AI_KEY") || "";
+    if (!key) { if (out) out.textContent = "Add your API key first."; return; }
+    if (out) out.textContent = "Checking…";
+    let res;
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}&pageSize=200`);
+    } catch (e) { if (out) out.textContent = "Check failed (network/CORS): " + e.message; return; }
+    if (!res.ok) { if (out) out.textContent = `Could not list models (${res.status}): ${(await res.text()).slice(0, 140)}`; return; }
+    const data = await res.json();
+    const models = (data.models || [])
+      .filter((m) => (m.supportedGenerationMethods || []).indexOf("generateContent") !== -1)
+      .map((m) => String(m.name || "").replace(/^models\//, ""))
+      .filter((n) => n.indexOf("gemini") === 0)
+      .sort();
+    if (!models.length) { if (out) out.textContent = "No text-generation Gemini models available for this key."; return; }
+    out.innerHTML = "Models your key can use (click to select):<br>"
+      + models.map((n) => `<button class="btn-sm wc-model-pick" data-m="${esc(n)}">${esc(n)}</button>`).join(" ");
+    out.querySelectorAll(".wc-model-pick").forEach((b) => b.addEventListener("click", () => {
+      const mf = document.getElementById("wc-ai-model");
+      if (mf) mf.value = b.dataset.m;
+      localStorage.setItem("RISKVIZ_AI_MODEL", b.dataset.m);
+    }));
   },
 
   // Which group values a participant belongs to for the chosen attribute. A
@@ -949,7 +1027,7 @@ const Control = {
     const session = this.viewSession;
     if (!session || session === "(all)") { if (status) status.textContent = "Pick a single session before cleaning."; return; }
     const cfg = this.aiConfig();
-    if (cfg.provider !== "ollama" && !cfg.key) { if (status) status.textContent = "Add your API key in 'AI cleaning setup' first."; return; }
+    if (!cfg.key) { if (status) status.textContent = "Add your API key in 'AI cleaning setup' first."; return; }
     const counts = this.promptTermCounts(promptId);
     const terms = Object.keys(counts);
     if (terms.length < 2) { if (status) status.textContent = "Not enough words to clean yet."; return; }
@@ -1007,35 +1085,45 @@ const Control = {
       + "Every term/member must be copied verbatim from the input list. Output nothing but the JSON.";
     const payload = terms.map((t) => `${t} (${counts[t]})`).join(", ");
     const user = "Terms with counts:\n" + payload;
-    let text;
-    if (cfg.provider === "claude") text = await this._callClaude(cfg.key, sys, user);
-    else if (cfg.provider === "gemini") text = await this._callGemini(cfg.key, sys, user);
-    else text = await this._callOllama(cfg.url, sys, user);
+    const text = await this._callGemini(cfg.key, cfg.model, sys, user);
     return this._parseProposal(text, terms);
   },
 
-  async _callClaude(key, sys, user) {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true"
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-5", max_tokens: 1500,
-        system: sys, messages: [{ role: "user", content: user }]
-      })
-    });
-    if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 160)}`);
-    const data = await res.json();
-    return (data.content || []).map((b) => b.text || "").join("");
+  // Shared fetch with a friendly quota message and a small backoff for transient
+  // per-minute 429s. Fails fast on daily-limit / hard-zero quota (retrying is
+  // pointless). `label` names the provider for error text.
+  async _aiFetch(label, url, opts) {
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let res;
+      try {
+        res = await fetch(url, opts);
+      } catch (e) {
+        throw new Error(`${label}: network/CORS error (${e.message}). The provider must allow browser requests.`);
+      }
+      if (res.ok) return res;
+      const body = await res.text();
+      if (res.status === 429) {
+        const daily = /daily|per day|RESOURCE_EXHAUSTED|limit['"\s:]*0|quota/i.test(body);
+        const perDay = /daily|per day/i.test(body);
+        // Retry only transient per-minute limits, and only if it doesn't look
+        // like a daily / zero-quota exhaustion.
+        if (attempt < maxAttempts && !perDay) {
+          await new Promise((r) => setTimeout(r, attempt * 1500));
+          continue;
+        }
+        throw new Error(`${label}: quota/rate limit (429). This is an account or model-quota issue, not a bug. Try a lighter model (e.g. a flash/lite or 8B model) or wait and retry.${daily ? " Your daily free quota may be used up." : ""}`);
+      }
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(`${label}: auth error (${res.status}). Check the API key for this provider.`);
+      }
+      throw new Error(`${label} ${res.status}: ${body.slice(0, 160)}`);
+    }
   },
 
-  async _callGemini(key, sys, user) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`;
-    const res = await fetch(url, {
+  async _callGemini(key, model, sys, user) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+    const res = await this._aiFetch("Gemini", url, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: sys }] },
@@ -1043,22 +1131,8 @@ const Control = {
         generationConfig: { responseMimeType: "application/json" }
       })
     });
-    if (!res.ok) throw new Error(`Gemini API ${res.status}: ${(await res.text()).slice(0, 160)}`);
     const data = await res.json();
     return ((((data.candidates || [])[0] || {}).content || {}).parts || []).map((p) => p.text || "").join("");
-  },
-
-  async _callOllama(baseUrl, sys, user) {
-    const res = await fetch(`${(baseUrl || "").replace(/\/$/, "")}/api/chat`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        model: "llama3.1", stream: false, format: "json",
-        messages: [{ role: "system", content: sys }, { role: "user", content: user }]
-      })
-    });
-    if (!res.ok) throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 160)}`);
-    const data = await res.json();
-    return (data.message || {}).content || "";
   },
 
   // Parse + strictly validate the model output. Anything malformed is dropped
