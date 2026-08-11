@@ -7,7 +7,7 @@
       ".read": "auth != null && auth.token.admin === true",
       "$uid": {
         ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
-        ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": "auth != null && (auth.token.admin === true || (auth.uid === $uid && newData.child('session').val() === root.child('control/active_session').val()))",
         ".validate": "newData.hasChildren(['created_at'])",
         "created_at":     { ".validate": "newData.isNumber()" },
         "session":        { ".validate": "newData.isString()" },
@@ -20,7 +20,6 @@
           }
         },
         "fields_ts":      { ".validate": "newData.isNumber()" },
-        "consent":        { ".validate": "newData.hasChildren(['version','ts'])" },
         "progress":       { ".validate": true },
         "$other":         { ".validate": false }
       }
@@ -32,7 +31,7 @@
         ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
         ".write": "auth != null && ($uid === auth.uid || auth.token.admin === true)",
         "$prompt_id": {
-          ".validate": "newData.hasChildren(['words','ts'])",
+          ".validate": "newData.hasChildren(['words','ts']) && newData.child('session').val() === root.child('control/active_session').val()",
           "words": {
             ".validate": "newData.hasChildren()",
             "$i": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60" }
@@ -50,7 +49,7 @@
         ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
         ".write": "auth != null && ($uid === auth.uid || auth.token.admin === true)",
         "$stim": {
-          ".validate": "newData.hasChildren(['clarity','usefulness','trust','ts'])",
+          ".validate": "newData.hasChildren(['clarity','usefulness','trust','ts']) && newData.child('session').val() === root.child('control/active_session').val()",
           "clarity":    { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 7" },
           "usefulness": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 7" },
           "trust":      { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 7" },
@@ -67,7 +66,7 @@
         ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
         ".write": "auth != null && ($uid === auth.uid || auth.token.admin === true)",
         "$qid": {
-          ".validate": "newData.hasChildren(['type','session','ts']) && (newData.hasChild('choice_idx') || newData.hasChild('choice_idxs'))",
+          ".validate": "newData.hasChildren(['type','session','ts']) && (newData.hasChild('choice_idx') || newData.hasChild('choice_idxs')) && newData.child('session').val() === root.child('control/active_session').val()",
           "type":       { ".validate": "newData.val() === 'single_choice' || newData.val() === 'multiple_choice'" },
           "choice_idx": { ".validate": "newData.isNumber() && newData.val() >= 0" },
           "choice_idxs": {
@@ -90,10 +89,23 @@
       }
     },
 
+    "sessions": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true",
+      "$name": {
+        ".validate": "newData.hasChildren(['created_at'])",
+        "created_at": { ".validate": "newData.isNumber()" },
+        "active":     { ".validate": "newData.isBoolean()" },
+        "$other":     { ".validate": false }
+      }
+    },
+
     "control": {
       ".read": "auth != null",
       ".write": "auth != null && auth.token.admin === true",
       "session":        { ".validate": "newData.isString()" },
+      "active_session": { ".validate": "newData.isString()" },
+      "reset":          { ".validate": "newData.isNumber()" },
       "gating_enabled": { ".validate": "newData.isBoolean()" },
       "pres": {
         "$section_id": {

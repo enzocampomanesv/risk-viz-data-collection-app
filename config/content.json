@@ -4,12 +4,14 @@
     "anchor_low": "Not at all",
     "anchor_mid": "Partially",
     "anchor_high": "Very much",
+    "welcome_title": "Welcome",
+    "welcome_body": "Great to have you here! Everything you share is anonymous, so be open and honest. Your insights are essential for shaping flood communication strategies that truly meet your needs. We will begin shortly 😊",
     "notice_completion1_title": "Great work – session one is done!",
     "notice_completion1_body": "You can leave the app and move on to the group activity. We will reconnect back in the app later.",
     "notice_welcome_title": "Welcome back!",
-    "notice_welcome_body": "Up next are examples of flood communication formats and channels. Review and score each one. The SPACE4ALL team will later tailor the project outputs based on your preferences. We will begin shortly 😊",
+    "notice_welcome_body": "Up next we will discuss your ideal flood communication approach and identify shared views within the group.. We will begin shortly 😊",
     "notice_completion2_title": "Well done!",
-    "notice_completion2_body": "We will now move into our last activity of the day, where we will talk about your preferences and identify shared views within the group. Let's go!"
+    "notice_completion2_body": "Congratulations! You were amazing today and we greatly appreciate your participation. You can leave the app now and wait for the moderator for final instructions."
   },
   "questions": [
     {
@@ -216,50 +218,154 @@
   "stimuli": [
     {
       "id": "st1",
-      "title": "SMS text alert",
+      "title": "Flood maps",
       "slides": [
         {
-          "image": "images/prompts/sms.png",
-          "caption": "A phone SMS: 'FLOOD ALERT: Heavy rain expected tonight. Move to higher ground if you are near the river.'"
+          "image": "images/prompts/map_01.jpg",
+          "caption": "Flood risk"
+        },
+        {
+          "image": "images/prompts/map_02.png",
+          "caption": "Flood hazard depth"
         }
       ],
-      "image": "images/prompts/sms.png",
-      "caption": "A phone SMS: 'FLOOD ALERT: Heavy rain expected tonight. Move to higher ground if you are near the river.'"
+      "image": "images/prompts/map_01.jpg",
+      "caption": "Flood risk"
     },
     {
       "id": "st2",
-      "title": "Flood map",
+      "title": "Safe routes",
       "slides": [
         {
-          "image": "images/prompts/fd_map.jpg",
-          "caption": "Flood depth map: colour-coded water depth by area."
+          "image": "images/prompts/evac_01.jpg",
+          "caption": "Evacuation routes map"
         },
         {
-          "image": "images/prompts/fe_map.jpg",
-          "caption": "Flood extent map: which areas are expected to flood."
+          "image": "images/prompts/evac_02.png",
+          "caption": "Safe spots map"
+        },
+        {
+          "image": "images/prompts/evac_03.png",
+          "caption": "Emergency shelters map"
+        },
+        {
+          "image": "images/prompts/evac_04.png",
+          "caption": "Safe and emergency spots"
         }
       ],
-      "image": "images/prompts/fd_map.jpg",
-      "caption": "Flood depth map: colour-coded water depth by area."
+      "image": "images/prompts/evac_01.jpg",
+      "caption": "Evacuation routes map"
     },
     {
       "id": "st3",
-      "title": "Community radio notice",
+      "title": "Infographic",
       "slides": [
         {
-          "image": "images/prompts/radio.png",
-          "caption": "A spoken radio announcement warning residents of rising water over the next 12 hours."
+          "image": "images/prompts/graph_01.png",
+          "caption": "Flood safety"
+        },
+        {
+          "image": "images/prompts/graph_02.jpeg",
+          "caption": "Flood prevention"
+        },
+        {
+          "image": "images/prompts/graph_03.jpg",
+          "caption": "Flood preparedness"
         }
       ],
-      "image": "images/prompts/radio.png",
-      "caption": "A spoken radio announcement warning residents of rising water over the next 12 hours."
+      "image": "images/prompts/graph_01.png",
+      "caption": "Flood safety"
+    },
+    {
+      "id": "st4",
+      "title": "Transmission by printed means",
+      "slides": [
+        {
+          "image": "images/prompts/print_01.gif",
+          "caption": "Leaflet"
+        },
+        {
+          "image": "images/prompts/print_02.jpg",
+          "caption": "Notice board"
+        },
+        {
+          "image": "images/prompts/print_03.jpg",
+          "caption": "Banner"
+        },
+        {
+          "image": "images/prompts/print_04.png",
+          "caption": "Printed maps"
+        }
+      ],
+      "image": "images/prompts/print_01.gif",
+      "caption": "Leaflet"
+    },
+    {
+      "id": "st5",
+      "title": "Transmission by radio",
+      "slides": [
+        {
+          "image": "images/prompts/radio_01.gif",
+          "caption": "Radio message"
+        }
+      ],
+      "image": "images/prompts/radio_01.gif",
+      "caption": "Radio message"
+    },
+    {
+      "id": "st6",
+      "title": "Transmission by video",
+      "slides": [
+        {
+          "image": "images/prompts/video_01.gif",
+          "caption": "Video via phone"
+        }
+      ],
+      "image": "images/prompts/video_01.gif",
+      "caption": "Video via phone"
+    },
+    {
+      "id": "st7",
+      "title": "Transmission by text",
+      "slides": [
+        {
+          "image": "images/prompts/text_01.jpg",
+          "caption": "Whatsapp messaging"
+        },
+        {
+          "image": "images/prompts/text_02.jpg",
+          "caption": "SMS text alert"
+        }
+      ],
+      "image": "images/prompts/text_01.jpg",
+      "caption": "Whatsapp messaging"
+    },
+    {
+      "id": "st8",
+      "title": "Transmission via arts",
+      "slides": [
+        {
+          "image": "images/prompts/arts_01.gif",
+          "caption": "Photo exposition"
+        },
+        {
+          "image": "images/prompts/arts_02.jpeg",
+          "caption": "Panel presentation"
+        },
+        {
+          "image": "images/prompts/arts_03.jpg",
+          "caption": "Community theater"
+        }
+      ],
+      "image": "images/prompts/arts_01.gif",
+      "caption": "Photo exposition"
     }
   ],
   "wordcloud": [
     {
       "id": "wc1",
       "section": "wordcloud",
-      "prompt": "Through which channels would you prefer to receive flood information?",
+      "prompt": "What type of information would be the best to receive?",
       "image": null,
       "max_words": 5,
       "min_words": 1,
@@ -268,7 +374,7 @@
     {
       "id": "wc2",
       "section": "wordcloud",
-      "prompt": "Which format would be most useful?",
+      "prompt": "What would be the most useful format?",
       "image": null,
       "max_words": 5,
       "min_words": 1,
@@ -277,7 +383,7 @@
     {
       "id": "wc3",
       "section": "wordcloud",
-      "prompt": "What is the most important improvement needed in the current flood communication approach you have in place?",
+      "prompt": "Through which dissemination channels would you prefer to receive such information?",
       "image": null,
       "max_words": 5,
       "min_words": 1,
@@ -286,7 +392,7 @@
     {
       "id": "wc4",
       "section": "wordcloud",
-      "prompt": "Is there anything we are missing in today's discussion?",
+      "prompt": "What would you like to do with this information?",
       "image": null,
       "max_words": 5,
       "min_words": 1,

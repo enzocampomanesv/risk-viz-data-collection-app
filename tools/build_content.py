@@ -109,9 +109,10 @@ def main():
     if settings["likert_points"] < 3 or settings["likert_points"] % 2 == 0:
         errors.append("[settings] likert_points must be an odd number >= 3 (e.g. 3, 5, or 7) "
                       "so the scale has a true midpoint.")
-    # Free-text notice copy: any key starting with notice_ is carried through as-is.
+    # Free-text screen copy: any key starting with notice_ or welcome_ is carried
+    # through as-is.
     for k, v in kv.items():
-        if k.startswith("notice_"):
+        if k.startswith("notice_") or k.startswith("welcome_"):
             settings[k] = s(v)
     content["settings"] = settings
 

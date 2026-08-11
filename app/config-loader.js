@@ -7,7 +7,7 @@
 const ConfigLoader = (function () {
 
   const VALID_SECTION_TYPES = [
-    "consent", "questionnaire", "notice", "assessment", "wordcloud"
+    "welcome", "questionnaire", "notice", "assessment", "wordcloud"
   ];
 
   // Question types allowed inside a questionnaire section.
@@ -84,8 +84,9 @@ const ConfigLoader = (function () {
       // Assessment (merged discussion + Likert): every assessment section shows
       // the same ordered list of stimuli.
       if (sec.type === "assessment" && Array.isArray(content.stimuli)) sec.stimuli = content.stimuli;
-      // Notice screens pull their copy from settings via the keys named in config.
-      if (sec.type === "notice") {
+      // Notice + welcome screens pull their copy from settings via the keys named
+      // in config.
+      if (sec.type === "notice" || sec.type === "welcome") {
         sec.title = settings[sec.title_key] || sec.title || "";
         sec.body = settings[sec.body_key] || sec.body || "";
       }
@@ -136,7 +137,7 @@ const ConfigLoader = (function () {
 
   function validate(cfg) {
     const errors = [];
-    ["study", "consent", "likert", "sections"].forEach((k) => {
+    ["study", "likert", "sections"].forEach((k) => {
       if (!(k in cfg)) errors.push(`Missing top-level key: "${k}"`);
     });
 

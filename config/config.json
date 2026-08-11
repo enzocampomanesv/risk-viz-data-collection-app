@@ -7,12 +7,11 @@
     "rtdb_region_note": "Create the Realtime Database in europe-west1 to match data residency."
   },
   "host_gating": {
-    "enabled": false
+    "enabled": true
   },
-  "consent": {
-    "version": "1.0",
-    "checkbox_label": "I have read and understood the above, and I agree to take part.",
-    "markdown_text": "## Consent to participate\n\nYou are invited to take part in a short workshop activity about how flood risk is communicated in your community.\n\n- Your participation is **voluntary** and you may stop at any time.\n- We collect your answers together with a few background details (age range, gender, community role, education). **We do not collect your name.**\n- Your data is stored securely and used only for research.\n\nIf you agree, tick the box below and continue."
+  "welcome": {
+    "title_key": "welcome_title",
+    "body_key": "welcome_body"
   },
   "likert": {
     "dimensions": [
@@ -32,10 +31,12 @@
   },
   "sections": [
     {
-      "id": "consent",
-      "type": "consent",
+      "id": "welcome",
+      "type": "welcome",
       "orientation": "portrait",
-      "gate": false
+      "gate": false,
+      "title_key": "welcome_title",
+      "body_key": "welcome_body"
     },
     {
       "id": "profile",
@@ -43,6 +44,13 @@
       "orientation": "portrait",
       "gate": false,
       "label": "About you"
+    },
+    {
+      "id": "questions",
+      "type": "questionnaire",
+      "orientation": "portrait",
+      "gate": true,
+      "label": "Flood experience & information"
     },
     {
       "id": "wordcloud",
@@ -70,27 +78,20 @@
       "body_key": "notice_welcome_body"
     },
     {
-      "id": "questions",
-      "type": "questionnaire",
+      "id": "assessment",
+      "type": "assessment",
       "orientation": "portrait",
       "gate": true,
-      "label": "Flood experience & information"
+      "label": "Format assessment"
     },
     {
       "id": "completion2",
       "type": "notice",
       "orientation": "portrait",
       "gate": true,
-      "label": "Assessment next",
+      "label": "Assessment done",
       "title_key": "notice_completion2_title",
       "body_key": "notice_completion2_body"
-    },
-    {
-      "id": "assessment",
-      "type": "assessment",
-      "orientation": "portrait",
-      "gate": true,
-      "label": "Format assessment"
     }
   ]
 }

@@ -12,8 +12,31 @@ function esc(s) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+// Small inline-SVG icons (stroke = currentColor, so they inherit button colour).
+const ICON_PATHS = {
+  restore: '<polyline points="7 3 3.5 6.5 7 10"/><path d="M3.5 6.5H10a3 3 0 0 1 3 3V13"/>',
+  x:       '<path d="M4 4 12 12"/><path d="M12 4 4 12"/>',
+  split:   '<path d="M8 4v8"/><path d="M6.5 8H2.5"/><path d="M4.3 6 2.3 8l2 2"/><path d="M9.5 8h4"/><path d="M11.7 6l2 2-2 2"/>',
+  merge:   '<path d="M2.5 8h4"/><path d="M4.5 6 6.5 8 4.5 10"/><path d="M13.5 8h-4"/><path d="M11.5 6 9.5 8l2 2"/>',
+  star:    '<path d="M8 2.3 9.7 5.9l3.9.4-2.9 2.7.8 3.9L8 11l-3.5 1.9.8-3.9L2.4 6.3l3.9-.4z"/>',
+  undo:    '<polyline points="7 3 3.5 6.5 7 10"/><path d="M3.5 6.5H10a3 3 0 0 1 3 3V13"/>',
+  redo:    '<polyline points="9 3 12.5 6.5 9 10"/><path d="M12.5 6.5H6a3 3 0 0 0-3 3V13"/>'
+};
+function icon(name) {
+  const filled = name === "star";
+  const paint = filled ? 'fill="currentColor" stroke="none"' : 'fill="none" stroke="currentColor" stroke-width="1.5"';
+  return `<svg class="ic" viewBox="0 0 16 16" width="14" height="14" ${paint} stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] || ""}</svg>`;
+}
+
+// Small "i" info button that reveals a popover of instructional text on click,
+// so guidance isn't constantly on screen. Toggling is handled by one delegated
+// capture-phase listener (see wireInfo).
+function info(text) {
+  return `<span class="info"><button type="button" class="info__btn" aria-label="More info" title="More info">i</button><span class="info__pop">${esc(text)}</span></span>`;
+}
+
 const SECTION_LABELS = {
-  consent: "Consent",
+  welcome: "Welcome",
   questionnaire: "Questionnaire", notice: "Notice",
   assessment: "Assessment", wordcloud: "Word cloud"
 };
@@ -100,7 +123,7 @@ const Control = {
 
   /* ----------------------------- panel ----------------------------- */
   renderPanel() {
-    const gated = this.config.sections.filter((s) => s.gate && s.type !== "assessment" && s.type !== "wordcloud");
+    const gated = this.config.sections.filter((s) => s.gate && s.type !== "assessment" && s.type !== "notice");
     const assess = this.config.sections.find((s) => s.type === "assessment");
     const stimuli = assess ? (assess.stimuli || []) : [];
     const wc = this.config.sections.find((s) => s.type === "wordcloud");
@@ -113,126 +136,150 @@ const Control = {
           <div><span class="who">${esc(this.user.email)}</span> &middot; <a id="signout">sign out</a></div>
         </div>
 
+        <!-- Persistent facilitation panel: always available while running -->
+        <div id="facil" class="facil facil--collapsed">
+          <div class="facil__bar">
+            <button id="facil-toggle" class="facil__togglebtn" aria-expanded="false">
+              <span class="facil__chev">▸</span> <span id="facil-summary">Live: —</span>
+            </button>
+            <div class="facil__quick">
+              <input id="bc-text" class="facil__bcinput" type="text" placeholder="Broadcast a message…" autocomplete="off">
+              <button id="bc-send" class="btn-sm btn-sm--accent">Send</button>
+              <button id="bc-clear" class="btn-sm">Clear</button>
+              <span class="facil__sep" aria-hidden="true"></span>
+              <select id="force-section-select" class="facil__moveselect" title="Move everyone to…">${this.config.sections.map((s) => `<option value="${esc(s.id)}">${esc(labelFor(s))}</option>`).join("")}</select>
+              <button id="force-section-go" class="btn-sm btn-sm--danger">Move</button>
+            </div>
+          </div>
+          <div id="bc-current" class="facil__bccur"></div>
+          <div class="facil__body">
+            <div class="facil__sec">
+              <div class="facil__h">Live participation</div>
+              <div id="monitor" class="monitor"><div class="muted">Loading…</div></div>
+            </div>
+            <div class="facil__sec">
+              <div class="facil__h">Gating</div>
+              <div class="row">
+                <div><div class="row__label">Gate master switch</div>
+                  <div class="row__sub">When off, self-paced sections ignore gates (word cloud still waits for you).</div></div>
+                <div style="display:flex;align-items:center;gap:.6rem">
+                  <span id="gating-pill" class="pill">…</span>
+                  <button id="gating-toggle" class="btn-sm">…</button>
+                </div>
+              </div>
+              ${gated.map((s) => `
+              <div class="row" data-gate="${esc(s.id)}">
+                <div><div class="row__label">${esc(labelFor(s))}</div>
+                  <div class="row__sub">${esc(s.id)}</div></div>
+                <div style="display:flex;align-items:center;gap:.6rem">
+                  <span class="pill gate-pill">…</span>
+                  <button class="btn-sm gate-toggle">…</button>
+                </div>
+              </div>`).join("")}
+            </div>
+          </div>
+        </div>
+
         <div class="ctrl-tabs">
           <button id="tabbtn-setup" class="ctrl-tab">Setup</button>
-          <button id="tabbtn-run" class="ctrl-tab ctrl-tab--on">Run</button>
+          <button id="tabbtn-wordcloud" class="ctrl-tab ctrl-tab--on">Word cloud</button>
+          <button id="tabbtn-assessment" class="ctrl-tab">Assessment</button>
           <button id="tabbtn-results" class="ctrl-tab">Results</button>
         </div>
 
+        <div id="live-bar" class="live-bar" style="display:none">
+          <span class="live-dot" aria-hidden="true"></span>
+          <span id="live-status">Live</span>
+          <label class="live-sess">Session <select id="view-session"></select></label>
+          <button id="live-pause" class="btn-sm">Pause</button>
+        </div>
+
         <div id="tab-setup" style="display:none">
-        <div class="card">
-          <h2>Workshop session</h2>
-          <p class="hint">Current: <strong id="cur-session">…</strong></p>
-          <div class="field">
-            <input id="session-input" type="text" placeholder="e.g. accra-2026-03" />
-            <button id="new-workshop" class="btn-sm btn-sm--danger">Start new workshop</button>
-          </div>
-          <p class="hint" style="margin-top:.6rem">"Start new workshop" sets this session name and re-locks all gates. No data is deleted.</p>
-        </div>
-
-        <div class="card">
-          <h2>Gating</h2>
-          <div class="row">
-            <div><div class="row__label">Gate master switch</div>
-              <div class="row__sub">When off, everyone is self-paced (gates ignored).</div></div>
-            <div style="display:flex;align-items:center;gap:.6rem">
-              <span id="gating-pill" class="pill">…</span>
-              <button id="gating-toggle" class="btn-sm">…</button>
+          <div class="card">
+            <h2>Workshop sessions ${info("Only the active session accepts participants; when none is active, entry and all writes are frozen. Create sessions ahead of time; on the day, Activate the right one (this locks all gates and clears previous host state). Deactivate to freeze data at the end. No data is deleted.")}</h2>
+            <p class="hint">Active session: <strong id="cur-session">…</strong></p>
+            <div class="field">
+              <input id="session-input" type="text" placeholder="new session name, e.g. accra-2026-03" />
+              <button id="session-create" class="btn-sm">Create session</button>
+            </div>
+            <div id="session-list" class="session-list"><div class="muted">Loading…</div></div>
+            <div style="border-top:1px solid var(--color-border);margin-top:.7rem;padding-top:.7rem">
+              <button id="reset-participants" class="btn-sm btn-sm--danger">Reset all participants ${info("Clears everyone's progress and responses and sends connected participants back to the welcome screen. Handy for un-sticking people during testing. Sessions are kept.")}</button>
             </div>
           </div>
-          ${gated.map((s) => `
-          <div class="row" data-gate="${esc(s.id)}">
-            <div><div class="row__label">${esc(labelFor(s))}</div>
-              <div class="row__sub">${esc(s.id)}</div></div>
-            <div style="display:flex;align-items:center;gap:.6rem">
-              <span class="pill gate-pill">…</span>
-              <button class="btn-sm gate-toggle">…</button>
-            </div>
-          </div>`).join("")}
-        </div>
-
-        <div class="card">
-          <h2>Back button visibility</h2>
-          <p class="hint">These three screens hide Back by default. Switch each on independently if you want participants able to return.</p>
-          ${BACK_TOGGLES.map((t) => `
-          <div class="row" data-backflag="${t.key}">
-            <div><div class="row__label">${esc(t.label)}</div>
-              <div class="row__sub">${esc(t.sub)}</div></div>
-            <div style="display:flex;align-items:center;gap:.6rem">
-              <span class="pill backflag-pill">…</span>
-              <button class="btn-sm backflag-toggle">…</button>
-            </div>
-          </div>`).join("")}
-        </div>
+          <div class="card">
+            <h2>Back button visibility ${info("These screens hide Back by default. Switch each on independently if you want participants able to return.")}</h2>
+            ${BACK_TOGGLES.map((t) => `
+            <div class="row" data-backflag="${t.key}">
+              <div><div class="row__label">${esc(t.label)}</div>
+                <div class="row__sub">${esc(t.sub)}</div></div>
+              <div style="display:flex;align-items:center;gap:.6rem">
+                <span class="pill backflag-pill">…</span>
+                <button class="btn-sm backflag-toggle">…</button>
+              </div>
+            </div>`).join("")}
+          </div>
+          <div class="card">
+            <h2>Danger zone</h2>
+            <details class="danger">
+              <summary>Clear all data before the first real workshop</summary>
+              <p class="hint">Permanently deletes <strong>every</strong> participant, response, word-cleaning decision, and session, and resets host state. Use this once to wipe test/dev data before your first workshop. This cannot be undone.</p>
+              <div class="field">
+                <input id="wipe-confirm" type="text" placeholder="type DELETE ALL to enable" autocomplete="off" />
+                <button id="wipe-go" class="btn-sm btn-sm--danger" disabled>Clear everything</button>
+              </div>
+              <p class="hint" id="wipe-status"></p>
+            </details>
+          </div>
         </div><!-- /tab-setup -->
 
-        <div id="tab-run">
-        <div class="card">
-          <h2>Live participation &amp; broadcast</h2>
-          <p class="hint">Participants in the current session, by where they are now.</p>
-          <div id="monitor" class="monitor"><div class="muted">Loading…</div></div>
-          <div class="bc-block">
-            <div class="row__label" style="margin-top:.9rem">Broadcast message</div>
-            <p class="hint">Shows as a banner on every participant's screen until cleared.</p>
-            <div class="field"><textarea id="bc-text" placeholder="e.g. Please put your phones down and look up."></textarea></div>
-            <div style="display:flex;gap:.5rem;margin-top:.6rem">
-              <button id="bc-send" class="btn-sm btn-sm--accent">Send</button>
-              <button id="bc-clear" class="btn-sm">Clear</button>
+        <div id="tab-wordcloud" style="display:none">
+          ${wc ? `
+          <div class="card" id="wc-card">
+            <h2>Run the word cloud ${info("Everyone sees the prompt you pick, with the input open. Move to the next prompt when the room is done. Open the word-cloud gate in the Gating panel above to let people in. The live cloud is below.")}</h2>
+            <div class="disc-nav">
+              <button id="wc-prev" class="btn-sm">‹ Prev</button>
+              <span id="wc-pos">– / ${wcPrompts.length}</span>
+              <button id="wc-next" class="btn-sm">Next ›</button>
             </div>
-            <p class="hint" id="bc-current" style="margin-top:.6rem"></p>
-          </div>
-        </div>
+            <div id="wc-preview" class="disc-preview muted"></div>
+            <div id="wc-count" class="hint" style="margin-top:.6rem"></div>
+          </div>` : ""}
+          <div id="r-words"></div>
+        </div><!-- /tab-wordcloud -->
 
-        <div class="card">
-          <h2>Move everyone</h2>
-          <p class="hint">Jumps every connected participant in this session to the chosen section now. Saved answers are kept — this only changes which screen they're on. Use sparingly.</p>
-          <div class="field">
-            <select id="force-section-select">${this.config.sections.map((s) => `<option value="${esc(s.id)}">${esc(labelFor(s))} (${esc(s.id)})</option>`).join("")}</select>
-            <button id="force-section-go" class="btn-sm btn-sm--danger">Move everyone here</button>
-          </div>
-        </div>
-
-        ${wc ? `
-        <div class="card" id="wc-card">
-          <h2>Word cloud</h2>
-          <p class="hint">Everyone sees the prompt you pick, with the word input open. Move to the next prompt when the room is done. The live cloud is on the Results tab.</p>
-          <div class="disc-nav">
-            <button id="wc-prev" class="btn-sm">‹ Prev</button>
-            <span id="wc-pos">– / ${wcPrompts.length}</span>
-            <button id="wc-next" class="btn-sm">Next ›</button>
-          </div>
-          <div id="wc-preview" class="disc-preview muted"></div>
-          <div id="wc-count" class="hint" style="margin-top:.6rem"></div>
-          <p class="hint" style="margin-top:.4rem">Use "Move everyone" above to bring the room in and to move them on after the last prompt.</p>
-        </div>` : ""}
-
-        ${assess ? `
-        <div class="card" id="assess-card">
-          <h2>Format assessment</h2>
-          <p class="hint">Everyone sees the figure you pick. Discuss it, then reveal the scale so participants can score it. Moving to the next figure hides the scale again.</p>
-          <div class="disc-nav">
-            <button id="as-prev" class="btn-sm">‹ Prev</button>
-            <span id="as-pos">– / ${stimuli.length}</span>
-            <button id="as-next" class="btn-sm">Next ›</button>
-          </div>
-          <div id="as-preview" class="disc-preview muted"></div>
-          <div class="row" style="margin-top:.7rem">
-            <div><div class="row__label">Likert scale</div>
-              <div class="row__sub">Reveal the scoring scale under the current figure.</div></div>
-            <div style="display:flex;align-items:center;gap:.6rem">
-              <span id="as-likert-pill" class="pill">…</span>
-              <button id="as-likert-toggle" class="btn-sm btn-sm--accent">…</button>
+        <div id="tab-assessment" style="display:none">
+          ${assess ? `
+          <div class="card" id="assess-card">
+            <h2>Run the assessment ${info("Everyone sees the figure you pick. Discuss it, then reveal the scale so participants can score it. Moving to the next figure hides the scale again. Use \u201cMove everyone\u201d in the panel to bring the room in.")}</h2>
+            <div class="disc-nav">
+              <button id="as-prev" class="btn-sm">‹ Prev</button>
+              <span id="as-pos">– / ${stimuli.length}</span>
+              <button id="as-next" class="btn-sm">Next ›</button>
             </div>
-          </div>
-          <div id="as-count" class="hint" style="margin-top:.6rem"></div>
-          <p class="hint" style="margin-top:.4rem">Use "Move everyone" above to bring the room into this activity and to move them on when the last figure is done.</p>
-        </div>` : ""}
-        </div><!-- /tab-run -->
+            <div id="as-preview" class="disc-preview muted"></div>
+            <div class="row" style="margin-top:.7rem">
+              <div><div class="row__label">Likert scale</div>
+                <div class="row__sub">Reveal the scoring scale under the current figure.</div></div>
+              <div style="display:flex;align-items:center;gap:.6rem">
+                <span id="as-likert-pill" class="pill">…</span>
+                <button id="as-likert-toggle" class="btn-sm btn-sm--accent">…</button>
+              </div>
+            </div>
+            <div id="as-count" class="hint" style="margin-top:.6rem"></div>
+          </div>` : ""}
+          <div id="r-likert"></div>
+        </div><!-- /tab-assessment -->
 
-        <div id="tab-results" style="display:none"></div>
+        <div id="tab-results" style="display:none">
+          <div id="r-choice"></div>
+          <div id="r-export"></div>
+        </div><!-- /tab-results -->
       </div>`;
 
     document.getElementById("signout").addEventListener("click", () => firebase.auth().signOut());
+    this.wireInfo();
+    this.wireFacilPanel();
     this.wireSession();
     this.wireGating(gated);
     this.wireAssessment();
@@ -241,8 +288,50 @@ const Control = {
     this.wireBroadcast();
     this.wireForceSection();
     this.wireTabs();
-    this.wireCollapsible();
+    this.wireCleanup();
     this.subscribe(gated);
+    this.startLive();
+    this.wireCollapsible();
+  },
+
+  // Persistent facilitation panel: collapse/expand toggle. Broadcast and move
+  // are inline in the bar (always usable without expanding); expanding reveals
+  // the full monitor and gating.
+  // One capture-phase listener drives every info popover: it runs before the
+  // card-collapse handler on <h2>, so clicking an info button inside a heading
+  // toggles the popover without collapsing the card. Works for buttons added
+  // later (word-cloud toolkit) too, since it's delegated.
+  wireInfo() {
+    if (this._infoWired) return;
+    this._infoWired = true;
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest && e.target.closest(".info__btn");
+      if (btn) {
+        e.stopPropagation(); e.preventDefault();
+        const box = btn.parentElement;
+        const wasOpen = box.classList.contains("info--open");
+        document.querySelectorAll(".info--open").forEach((o) => o.classList.remove("info--open"));
+        if (!wasOpen) box.classList.add("info--open");
+      } else if (!(e.target.closest && e.target.closest(".info"))) {
+        document.querySelectorAll(".info--open").forEach((o) => o.classList.remove("info--open"));
+      }
+    }, true);
+  },
+
+  wireFacilPanel() {
+    const panel = document.getElementById("facil");
+    const toggle = document.getElementById("facil-toggle");
+    const setOpen = (open) => {
+      panel.classList.toggle("facil--collapsed", !open);
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.querySelector(".facil__chev").textContent = open ? "▾" : "▸";
+    };
+    setOpen(localStorage.getItem("RISKVIZ_FACIL_OPEN") === "1");
+    toggle.addEventListener("click", () => {
+      const open = panel.classList.contains("facil--collapsed");
+      setOpen(open);
+      localStorage.setItem("RISKVIZ_FACIL_OPEN", open ? "1" : "0");
+    });
   },
 
   // Make every card collapsible by clicking its <h2>. Collapse state is keyed by
@@ -274,40 +363,167 @@ const Control = {
   },
 
   wireTabs() {
-    const tabs = ["setup", "run", "results"];
+    const tabs = ["setup", "wordcloud", "assessment", "results"];
+    const analytical = { wordcloud: true, assessment: true, results: true };
     const show = (tab) => {
       this.tab = tab;
       tabs.forEach((t) => {
         document.getElementById("tab-" + t).style.display = (t === tab) ? "" : "none";
         document.getElementById("tabbtn-" + t).classList.toggle("ctrl-tab--on", t === tab);
       });
-      if (tab === "results") this.loadResults();
-      else this.stopLive();
+      // The session/live bar is shared across analytical tabs, hidden on Setup.
+      document.getElementById("live-bar").style.display = analytical[tab] ? "" : "none";
     };
     tabs.forEach((t) => document.getElementById("tabbtn-" + t).addEventListener("click", () => show(t)));
-    show("run");   // default to the live facilitation view
+    show("wordcloud");
   },
 
   /* ----------------------------- session ----------------------------- */
+  seqSafe(name) { return String(name).replace(/[.#$/\[\]]/g, "_"); },
+
   wireSession() {
-    document.getElementById("new-workshop").addEventListener("click", async () => {
+    document.getElementById("session-create").addEventListener("click", async () => {
       const name = document.getElementById("session-input").value.trim();
       if (!name) { alert("Type a session name first."); return; }
-      if (!confirm(`Start new workshop "${name}"?\n\nThis sets the session name and re-locks all gates. Existing data is kept (tagged by its session).`)) return;
-      const gates = {};
-      this.config.sections.filter((s) => s.gate).forEach((s) => { gates[s.id] = "locked"; });
-      const update = { session: name, section_gates: gates };
-      // Reset any host-driven presentation state (assessment figure + scale,
-      // wordcloud prompt index).
-      this.config.sections.filter((s) => s.type === "assessment").forEach((s) => {
-        update[`pres/${s.id}`] = { idx: 0, likert_shown: false };
-      });
-      this.config.sections.filter((s) => s.type === "wordcloud").forEach((s) => {
-        update[`pres/${s.id}`] = { idx: 0 };
-      });
-      await this.db.ref("control").update(update);
-      document.getElementById("session-input").value = "";
+      if (/[.#$/\[\]]/.test(name)) { alert("Session name can't contain . # $ / [ ]"); return; }
+      if (this._sessions && this._sessions[name]) { alert("That session already exists."); return; }
+      try {
+        await this.db.ref(`sessions/${name}`).set({ created_at: firebase.database.ServerValue.TIMESTAMP, active: false });
+        document.getElementById("session-input").value = "";
+      } catch (e) { alert("Could not create session: " + e.message); }
     });
+    // Live list of sessions + which one is active.
+    this.db.ref("sessions").on("value", (s) => { this._sessions = s.val() || {}; this.renderSessionList(); });
+    const reset = document.getElementById("reset-participants");
+    if (reset) reset.addEventListener("click", () => this.resetParticipants());
+    this.db.ref("control/active_session").on("value", (s) => {
+      this._activeSession = s.val() || null;
+      const el = document.getElementById("cur-session");
+      if (el) el.textContent = this._activeSession || "none (frozen)";
+      this.renderSessionList();
+    });
+  },
+
+  renderSessionList() {
+    const host = document.getElementById("session-list");
+    if (!host) return;
+    const names = Object.keys(this._sessions || {}).sort();
+    if (!names.length) { host.innerHTML = "<div class='muted'>No sessions yet. Create one above.</div>"; return; }
+    const active = this._activeSession;
+    host.innerHTML = names.map((name) => {
+      const isActive = name === active;
+      return `<div class="session-row ${isActive ? "session-row--on" : ""}">
+        <div class="session-row__name">${esc(name)} ${isActive ? '<span class="pill pill--open">ACTIVE</span>' : ""}</div>
+        <div class="session-row__acts">
+          <button class="btn-sm ${isActive ? "" : "btn-sm--accent"} session-act" data-name="${esc(name)}" data-act="${isActive ? "off" : "on"}">${isActive ? "Deactivate" : "Activate"}</button>
+          ${isActive ? "" : `<button class="btn-sm btn-sm--danger session-del" data-name="${esc(name)}">Delete</button>`}
+        </div>
+      </div>`;
+    }).join("");
+    host.querySelectorAll(".session-act").forEach((b) => b.addEventListener("click", () => {
+      if (b.dataset.act === "on") this.activateSession(b.dataset.name);
+      else this.deactivateSession(b.dataset.name);
+    }));
+    host.querySelectorAll(".session-del").forEach((b) => b.addEventListener("click", () => this.deleteSession(b.dataset.name)));
+  },
+
+  async deleteSession(name) {
+    if (name === this._activeSession) { alert("Deactivate this session before deleting it."); return; }
+    if (!confirm(`Delete session "${name}"?\n\nThis removes it from the session list only. Responses already collected under this name are NOT deleted and stay viewable in Results. Re-creating a session with the same name re-links them.`)) return;
+    try { await this.db.ref(`sessions/${name}`).remove(); }
+    catch (e) { alert("Could not delete: " + e.message); }
+  },
+
+  // Tucked-away, type-to-confirm full wipe. Deletes all data-node children
+  // (participants/word_responses/assessments/choices), the per-session counters,
+  // and the whole sessions + control subtrees. Admin-only by rules.
+  wireCleanup() {
+    const input = document.getElementById("wipe-confirm");
+    const go = document.getElementById("wipe-go");
+    if (!input || !go) return;
+    input.addEventListener("input", () => { go.disabled = input.value.trim() !== "DELETE ALL"; });
+    go.addEventListener("click", () => this.cleanupAll());
+  },
+
+  // Delete all participant records, responses, and per-session counters.
+  // Shared by "reset participants" and the full cleanup. Admin-only by rules.
+  async _clearParticipantData(setStatus) {
+    for (const node of ["participants", "word_responses", "assessments", "choices"]) {
+      if (setStatus) setStatus(`Clearing ${node}…`);
+      const snap = await this.db.ref(node).once("value");
+      const val = snap.val() || {};
+      const upd = {};
+      Object.keys(val).forEach((k) => { upd[k] = null; });
+      if (Object.keys(upd).length) await this.db.ref(node).update(upd);
+    }
+    const names = new Set(Object.keys(this._sessions || {}));
+    Object.values(this.state.participantsRaw || {}).forEach((p) => { if (p && p.session) names.add(p.session); });
+    if (names.size) {
+      if (setStatus) setStatus("Clearing counters…");
+      const seqUpd = {};
+      names.forEach((n) => { seqUpd[n] = null; });
+      await this.db.ref("participant_seq").update(seqUpd);
+    }
+  },
+
+  // Send every connected participant back to the welcome screen as if entering
+  // for the first time: clear their record + responses, then push a reset signal
+  // that reloads their open app. Session markers and control state are kept.
+  async resetParticipants() {
+    if (!confirm("Reset ALL participants?\n\nThis clears everyone's progress and responses and sends every connected participant back to the welcome screen, as if entering for the first time. Session markers are kept. Handy for un-sticking participants during testing.")) return;
+    try {
+      await this._clearParticipantData();
+      await this.db.ref("control/reset").set(firebase.database.ServerValue.TIMESTAMP);
+      alert("All participants reset. Open apps will return to the welcome screen.");
+    } catch (e) {
+      alert("Reset failed: " + e.message);
+    }
+  },
+
+  async cleanupAll() {
+    const input = document.getElementById("wipe-confirm");
+    const status = document.getElementById("wipe-status");
+    if (!input || input.value.trim() !== "DELETE ALL") return;
+    if (!confirm("Final check: permanently delete ALL workshop data and sessions? This cannot be undone.")) return;
+    const setStatus = (t) => { if (status) status.textContent = t; };
+    try {
+      await this._clearParticipantData(setStatus);
+      setStatus("Resetting sessions & host state…");
+      await this.db.ref("control").set(null);
+      await this.db.ref("sessions").set(null);
+      setStatus("");
+      input.value = "";
+      document.getElementById("wipe-go").disabled = true;
+      alert("All workshop data cleared. Create and activate a fresh session to begin.");
+    } catch (e) {
+      setStatus("Cleanup failed: " + e.message);
+    }
+  },
+
+  async activateSession(name) {
+    if (!confirm(`Activate "${name}"?\n\nParticipants will be able to join and submit. Any other active session is deactivated, all gates are re-locked, and host presentation state is reset. No data is deleted.`)) return;
+    // Flip active flags: this one on, all others off.
+    const sessUpdate = {};
+    Object.keys(this._sessions || {}).forEach((n) => { sessUpdate[`${n}/active`] = (n === name); });
+    // Control: point active_session here, mirror to session (legacy/results view),
+    // re-lock gates, reset host-driven presentation state.
+    const gates = {};
+    this.config.sections.filter((s) => s.gate).forEach((s) => { gates[s.id] = "locked"; });
+    const ctrl = { active_session: name, session: name, section_gates: gates };
+    this.config.sections.filter((s) => s.type === "assessment").forEach((s) => { ctrl[`pres/${s.id}`] = { idx: 0, likert_shown: false }; });
+    this.config.sections.filter((s) => s.type === "wordcloud").forEach((s) => { ctrl[`pres/${s.id}`] = { idx: 0 }; });
+    try {
+      await this.db.ref("sessions").update(sessUpdate);
+      await this.db.ref("control").update(ctrl);
+    } catch (e) { alert("Could not activate: " + e.message); }
+  },
+
+  async deactivateSession(name) {
+    if (!confirm(`Deactivate "${name}"?\n\nData is frozen: participants can no longer join or submit. No data is deleted. You can re-activate later.`)) return;
+    try {
+      await this.db.ref(`sessions/${name}/active`).set(false);
+      await this.db.ref("control/active_session").remove();   // null = nothing active = frozen
+    } catch (e) { alert("Could not deactivate: " + e.message); }
   },
 
   /* ----------------------------- gating ----------------------------- */
@@ -456,10 +672,16 @@ const Control = {
 
   /* ----------------------------- broadcast ----------------------------- */
   wireBroadcast() {
-    document.getElementById("bc-send").addEventListener("click", async () => {
-      const text = document.getElementById("bc-text").value.trim();
+    const send = async () => {
+      const input = document.getElementById("bc-text");
+      const text = input.value.trim();
       if (!text) return;
       await this.db.ref("control/broadcast").set({ text, ts: firebase.database.ServerValue.TIMESTAMP });
+      input.value = "";
+    };
+    document.getElementById("bc-send").addEventListener("click", send);
+    document.getElementById("bc-text").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); send(); }
     });
     document.getElementById("bc-clear").addEventListener("click", async () => {
       await this.db.ref("control/broadcast").set(null);
@@ -489,9 +711,19 @@ const Control = {
   /* ----------------------------- live listeners ----------------------------- */
   subscribe(gated) {
     this.db.ref("control/session").on("value", (s) => {
+      // Mirror of the active session name; stays at the last name when frozen so
+      // the monitor and results still reference the just-run workshop. The
+      // "active vs frozen" label (cur-session) is owned by the active_session
+      // listener in wireSession.
       this.state.session = s.val() || "(none set)";
-      const el = document.getElementById("cur-session");
-      if (el) el.textContent = this.state.session;
+      // Follow the active session in the results view until the host explicitly
+      // picks a different one from the session selector.
+      if (!this._viewPinned) {
+        this.viewSession = this.state.session;
+        this.refreshLiveBarOptions();
+        this._dirty = true;
+        this.renderLive(true);
+      }
       this.renderMonitor();
     });
 
@@ -592,7 +824,7 @@ const Control = {
       if (idx >= sections.length) { done++; return; }
       counts[idx]++;
       const sec = sections[idx];
-      if (this.state.gatingEnabled && sec.gate && sec.type !== "assessment" && sec.type !== "notice" && sec.type !== "wordcloud" && this.state.gates[sec.id] !== "open") waiting[idx]++;
+      if (this.state.gatingEnabled && sec.gate && sec.type !== "assessment" && sec.type !== "notice" && this.state.gates[sec.id] !== "open") waiting[idx]++;
     });
 
     const rows = sections.map((s, i) => {
@@ -605,6 +837,17 @@ const Control = {
       (rows || `<div class="muted">No participants in this session yet.</div>`) +
       (done ? `<div class="monitor__row"><span>Finished</span><span class="monitor__count">${done}</span></div>` : "") +
       `<div class="monitor__total">Total in "${esc(this.state.session)}": ${inSession.length}</div>`;
+
+    // Compact one-line summary for the collapsed facilitation bar: where most
+    // people are + total waiting.
+    const summary = document.getElementById("facil-summary");
+    if (summary) {
+      const totalWaiting = waiting.reduce((a, b) => a + b, 0);
+      let topIdx = -1, topN = 0;
+      counts.forEach((c, i) => { if (c > topN) { topN = c; topIdx = i; } });
+      const where = topIdx >= 0 ? `${topN} in ${labelFor(sections[topIdx])}` : (done ? `${done} finished` : "no participants yet");
+      summary.textContent = `Live: ${where}${totalWaiting ? ` · ${totalWaiting} waiting` : ""} · ${inSession.length} total`;
+    }
   },
 
   /* ----------------------------- results tab ----------------------------- */
@@ -627,25 +870,27 @@ const Control = {
     return m;
   },
 
-  async loadResults() {
-    const host = document.getElementById("tab-results");
-    host.innerHTML = `<div class="card"><div class="muted">Connecting live to "${esc(this.state.session)}"…</div></div>`;
+  // Live data now runs continuously (not only on the Results tab), because the
+  // word cloud, assessment Likert, and results are spread across activity tabs
+  // that stay mounted. Started once from renderPanel.
+  startLive() {
     this.stopLive();
     this.results = { words: {}, assess: {}, choices: {} };
     this._dirty = true; this._paused = false; this._lastUpdate = null; this._liveRefs = []; this._cloudsDrawn = false;
     this.viewSession = this.state.session;
 
     const addRef = (path, ev, cb) => { const r = this.db.ref(path); r.on(ev, cb); this._liveRefs.push([r, ev, cb]); };
-    // Small per-user nodes: keep a fresh full snapshot.
-    addRef("assessments", "value", (s) => { this.results.assess = s.val() || {}; this._dirty = true; });
+    addRef("assessments", "value", (s) => { this.results.assess = s.val() || {}; this._dirty = true; this.paintAssessCard(); });
     addRef("choices", "value", (s) => { this.results.choices = s.val() || {}; this._dirty = true; });
     addRef("word_responses", "value", (s) => {
       this.results.words = s.val() || {};
+      this.paintWcCard();
       if (!this._cloudsDrawn && this._cloudRedraw) this._cloudRedraw();
     });
 
-    this.renderResults();                                // build the shell (incl. word clouds)
-    setTimeout(() => this.renderLive(true), 500);        // first paint once snapshots have settled
+    this.wireLiveBar();
+    this.renderWordResults(document.getElementById("r-words"));   // word cloud toolkit (its own tab)
+    setTimeout(() => this.renderLive(true), 500);
     this._liveTimer = setInterval(() => { if (this._dirty && !this._paused) this.renderLive(); }, 3000);
   },
 
@@ -655,57 +900,43 @@ const Control = {
     this._liveRefs = [];
   },
 
-  renderResults() {
-    const host = document.getElementById("tab-results");
+  // Populate + wire the shared session/live bar (session picker, pause).
+  wireLiveBar() {
+    const sel = document.getElementById("view-session");
+    if (!sel) return;
     const sessions = this.allSessions();
-    const opts = sessions.map((s) => `<option value="${esc(s)}"${s === this.viewSession ? " selected" : ""}>${esc(s)}</option>`).join("")
+    sel.innerHTML = sessions.map((s) => `<option value="${esc(s)}"${s === this.viewSession ? " selected" : ""}>${esc(s)}</option>`).join("")
       + `<option value="(all)"${this.viewSession === "(all)" ? " selected" : ""}>(all sessions)</option>`;
-    host.innerHTML = `
-      <div class="live-bar">
-        <span class="live-dot" aria-hidden="true"></span>
-        <span id="live-status">Live</span>
-        <label class="live-sess">Session <select id="view-session">${opts}</select></label>
-        <button id="live-pause" class="btn-sm">Pause</button>
-      </div>
-      <p class="hint" style="margin:.2rem 0 .7rem">Choice results &amp; Likert update every 3s; word clouds update when you change a filter or press Redraw. Viewing a past session shows static history. The Python dashboard remains the home for SQLite export.</p>
-      <div class="ctrl-subtabs">
-        <button id="rsub-words" class="ctrl-subtab ctrl-subtab--on">Word clouds</button>
-        <button id="rsub-likert" class="ctrl-subtab">Likert</button>
-        <button id="rsub-choice" class="ctrl-subtab">Questionnaire</button>
-        <button id="rsub-export" class="ctrl-subtab">Export</button>
-      </div>
-      <div id="r-words"></div>
-      <div id="r-likert" style="display:none"></div>
-      <div id="r-choice" style="display:none"></div>
-      <div id="r-export" style="display:none"></div>`;
-    const rsubs = ["words", "likert", "choice", "export"];
-    rsubs.forEach((n) => document.getElementById("rsub-" + n).addEventListener("click", () => {
-      rsubs.forEach((m) => {
-        document.getElementById("r-" + m).style.display = (m === n) ? "" : "none";
-        document.getElementById("rsub-" + m).classList.toggle("ctrl-subtab--on", m === n);
-      });
-    }));
     document.getElementById("live-pause").addEventListener("click", (e) => {
       this._paused = !this._paused;
       e.target.textContent = this._paused ? "Resume" : "Pause";
       this.updateLiveBar();
       if (!this._paused) this.renderLive(true);
     });
-    document.getElementById("view-session").addEventListener("change", (e) => {
+    sel.addEventListener("change", (e) => {
       this.viewSession = e.target.value;
+      this._viewPinned = true;
       this._cloudsDrawn = false;
       this.renderLive(true);
       if (this._cloudRedraw) this._cloudRedraw();
       this.updateLiveBar();
     });
-    this.renderWordResults(document.getElementById("r-words"));
     this.updateLiveBar();
-    this.wireCollapsible(document.getElementById("tab-results"));
+  },
+
+  // Keep the session picker options fresh as new sessions produce data.
+  refreshLiveBarOptions() {
+    const sel = document.getElementById("view-session");
+    if (!sel) return;
+    const sessions = this.allSessions();
+    const want = sessions.map((s) => `<option value="${esc(s)}"${s === this.viewSession ? " selected" : ""}>${esc(s)}</option>`).join("")
+      + `<option value="(all)"${this.viewSession === "(all)" ? " selected" : ""}>(all sessions)</option>`;
+    if (sel.innerHTML !== want) sel.innerHTML = want;
   },
 
   updateLiveBar() {
     const st = document.getElementById("live-status");
-    const bar = document.querySelector(".live-bar");
+    const bar = document.getElementById("live-bar");
     if (!st || !bar) return;
     const viewing = this.viewSession !== this.state.session;   // a past/other session = static
     const stamp = this._lastUpdate ? this._lastUpdate.toLocaleTimeString() : "—";
@@ -719,11 +950,12 @@ const Control = {
     if (!force && (!this._dirty || this._paused)) return;
     this._dirty = false;
     this._lastUpdate = new Date();
+    this.refreshLiveBarOptions();
     this.renderLikert(document.getElementById("r-likert"));
     this.renderQuestionnaireResults(document.getElementById("r-choice"));
     this.renderExport(document.getElementById("r-export"));
     this.updateLiveBar();
-    this.wireCollapsible(document.getElementById("tab-results"));
+    this.wireCollapsible();
   },
 
   // Word prompts are now word_prompt-typed questions inside questionnaire
@@ -758,10 +990,14 @@ const Control = {
       <div class="res-controls">
         <label>Prompt <select id="wc-prompt">${promptOpts}</select></label>
         <label>Group by <select id="wc-group"><option value="">(none)</option>${fields.map((f) => `<option value="${esc(f.id)}">${esc(f.label || f.id)}${f.multi ? " (multi-select)" : ""}</option>`).join("")}</select></label>
+      </div>
+      <div class="res-actions">
         <button id="wc-redraw" class="btn-sm">↻ Redraw</button>
-        <button id="wc-clean" class="btn-sm btn-sm--accent">🧹 Clean words (AI)</button>
         <button id="wc-export" class="btn-sm">⬇ PNG</button>
-        <button id="wc-export-csv" class="btn-sm">⬇ CSV (raw + processed)</button>
+        <button id="wc-export-csv" class="btn-sm">⬇ CSV</button>
+      </div>
+      <div class="res-actions">
+        <button id="wc-clean" class="btn-sm btn-sm--accent">🧹 Clean words (AI)</button>
         <button id="wc-broadcast" class="btn-sm btn-sm--accent">📡 Broadcast to participants</button>
       </div>
       <div id="wc-clean-status" class="hint"></div>
@@ -950,7 +1186,10 @@ const Control = {
         window.WordCloud(canvas, {
           list: entries, gridSize: 12, weightFactor: (s) => Math.max(18, (s / maxC) * 90),
           color: () => ["#0E7C86", "#1A1D21", "#5B6470"][Math.floor(Math.random() * 3)],
-          backgroundColor: "#ffffff", rotateRatio: 0.3
+          backgroundColor: "#ffffff", rotateRatio: 0.3,
+          // Shrink an over-large word to fit the canvas instead of silently
+          // dropping it (the cause of words intermittently disappearing).
+          shrinkToFit: true, drawOutOfBound: false
         });
         this._wcRender.canvases.push({ groupKey: g, canvas });
       } else {
@@ -1079,7 +1318,10 @@ const Control = {
   async aiClean(cfg, terms, counts) {
     const sys = "You clean a list of short words/phrases from a workshop word-cloud. "
       + "Return ONLY JSON: {\"removed\":[{\"term\":\"\",\"reason\":\"\"}],\"merges\":[{\"members\":[\"\",\"\"]}]}. "
-      + "removed = gibberish/nonsense (e.g. random letters) only; do NOT remove real words. "
+      + "removed = (a) gibberish/nonsense (e.g. random letters), and (b) profanity, curse words, slurs, "
+      + "racial/ethnic slurs, sexual or anatomical terms (e.g. genitalia), and other offensive or sensitive "
+      + "words, in ANY language. Give a short reason ('gibberish', 'profanity', 'slur', 'sexual term'). "
+      + "Do NOT remove ordinary real words that merely relate to the topic. "
       + "merges = groups of terms that mean the same thing or are minor typos of each other "
       + "(e.g. tv/television, televsion/television). Only group clear synonyms or typos, not merely related words. "
       + "Every term/member must be copied verbatim from the input list. Output nothing but the JSON.";
@@ -1171,21 +1413,42 @@ const Control = {
     await this.db.ref(`control/word_cleaning/${session}/${promptId}/${path}`).set(value);
   },
 
+  // Manually remove a word (host judgement, on top of the LLM). Writes ts too so
+  // the record is valid even if this is the first cleaning action for the prompt.
+  async manualRemove(promptId, term) {
+    const session = this.viewSession;
+    if (!session || session === "(all)") return;
+    await this.db.ref(`control/word_cleaning/${session}/${promptId}`).update({
+      ts: firebase.database.ServerValue.TIMESTAMP,
+      [`removed/${term}`]: { reason: "removed by host", overridden: false }
+    });
+  },
+
+  // Set which member of a merge group is the canonical (shown) term. Also clears
+  // any split flag on that member, since the canonical is always included.
+  async setCanonical(promptId, canonKey, mem) {
+    const session = this.viewSession;
+    if (!session || session === "(all)") return;
+    await this.db.ref(`control/word_cleaning/${session}/${promptId}/merges/${canonKey}`).update({
+      canonical: mem,
+      [`split/${mem}`]: null
+    });
+  },
+
   renderCleaningReview(promptId) {
     const el = document.getElementById("wc-review");
     if (!el) return;
     const dec = ((this._cleaning || {})[this.viewSession] || {})[promptId];
-    if (!dec || (!Object.keys(dec.removed || {}).length && !Object.keys(dec.merges || {}).length)) {
-      el.innerHTML = "";
-      return;
-    }
+    // Show the panel whenever a cleaning run exists for this prompt (even with no
+    // removals/merges), so the manual-removal list is available afterwards.
+    if (!dec) { el.innerHTML = ""; return; }
     const removed = dec.removed || {}, merges = dec.merges || {};
     const remRows = Object.keys(removed).sort().map((t) => {
       const r = removed[t];
       return `<div class="wc-rev__row ${r.overridden ? "wc-rev__row--off" : ""}">
         <span class="wc-rev__term">${esc(t)}</span>
         <span class="wc-rev__reason">${esc(r.reason || "removed")}</span>
-        <button class="btn-sm wc-rev-remove" data-term="${esc(t)}" data-to="${r.overridden ? "1" : "0"}">${r.overridden ? "Remove again" : "Put back"}</button>
+        <button class="btn-sm btn-icon ${r.overridden ? "btn-icon--danger" : ""} wc-rev-remove" data-term="${esc(t)}" data-to="${r.overridden ? "0" : "1"}" title="${r.overridden ? "Remove again" : "Put back"}" aria-label="${r.overridden ? "Remove again" : "Put back"}">${r.overridden ? icon("x") : icon("restore")}</button>
       </div>`;
     }).join("");
     const merRows = Object.keys(merges).sort().map((canon) => {
@@ -1193,30 +1456,106 @@ const Control = {
       const members = Array.isArray(m.members) ? m.members : Object.keys(m.members || {});
       const split = m.split || {};
       const memHTML = members.map((mem) => {
-        if (mem === m.canonical) return `<span class="wc-rev__canon">${esc(mem)}</span>`;
+        if (mem === m.canonical) return `<span class="wc-rev__canon">${icon("star")} ${esc(mem)} <span class="muted">(main word)</span></span>`;
         const isSplit = !!split[mem];
         return `<span class="wc-rev__mem ${isSplit ? "wc-rev__mem--split" : ""}">${esc(mem)}
-          <button class="btn-sm wc-rev-split" data-canon="${esc(canon)}" data-mem="${esc(mem)}" data-to="${isSplit ? "0" : "1"}">${isSplit ? "re-merge" : "split"}</button>
+          ${isSplit ? "" : `<button class="btn-sm btn-icon wc-rev-canon" data-canon="${esc(canon)}" data-mem="${esc(mem)}" title="Make main word" aria-label="Make main word">${icon("star")}</button>`}
+          <button class="btn-sm btn-icon wc-rev-split" data-canon="${esc(canon)}" data-mem="${esc(mem)}" data-to="${isSplit ? "0" : "1"}" title="${isSplit ? "Re-merge" : "Split out"}" aria-label="${isSplit ? "Re-merge" : "Split out"}">${isSplit ? icon("merge") : icon("split")}</button>
         </span>`;
-      }).join(" ");
+      }).join('<span class="wc-rev__sep" aria-hidden="true">|</span>');
       return `<div class="wc-rev__row ${m.overridden ? "wc-rev__row--off" : ""}">
         <span class="wc-rev__group">→ ${esc(m.canonical)}: ${memHTML}</span>
-        <button class="btn-sm wc-rev-group" data-canon="${esc(canon)}" data-to="${m.overridden ? "0" : "1"}">${m.overridden ? "redo group" : "undo group"}</button>
+        <button class="btn-sm btn-icon wc-rev-group" data-canon="${esc(canon)}" data-to="${m.overridden ? "0" : "1"}" title="${m.overridden ? "Redo group" : "Undo group"}" aria-label="${m.overridden ? "Redo group" : "Undo group"}">${m.overridden ? icon("redo") : icon("undo")}</button>
+        <button class="btn-sm btn-icon btn-icon--danger wc-rev-delmerge" data-canon="${esc(canon)}" title="Remove this merge from the list" aria-label="Remove this merge">${icon("x")}</button>
       </div>`;
     }).join("");
 
+    // Manual list: the words currently shown in the cloud (processed). Each can
+    // be removed by hand, or ticked and merged together. Reversible above.
+    const proc = (this._wcFreqs && this._wcFreqs.promptId === promptId) ? (this._wcFreqs.processed || {}) : {};
+    const procTerms = Object.keys(proc).sort((a, b) => proc[b] - proc[a]);
+    const manRows = procTerms.map((t) =>
+      `<span class="wc-rev__chip">
+        <label class="wc-rev__pick"><input type="checkbox" class="wc-merge-chk" data-term="${esc(t)}"> ${esc(t)}</label>
+        <span class="muted">${proc[t]}</span>
+        <button class="btn-sm btn-icon btn-icon--danger wc-rev-manual" data-term="${esc(t)}" title="Remove this word" aria-label="Remove this word">${icon("x")}</button>
+      </span>`
+    ).join(" ");
+
     el.innerHTML = `<div class="wc-review">
-      <div class="wc-review__h">AI cleaning — <span class="muted">${esc(dec.model || "")}</span> · you can revert anything</div>
+      <div class="wc-review__h">AI cleaning <span class="muted">${esc(dec.model || "")}</span> ${info("Everything here is reversible. Removed words can be put back, merges undone or split, and the main shown word changed with \u2605.")}</div>
       ${remRows ? `<div class="wc-review__sec"><div class="wc-review__t">Removed</div>${remRows}</div>` : ""}
       ${merRows ? `<div class="wc-review__sec"><div class="wc-review__t">Merged</div>${merRows}</div>` : ""}
+      ${manRows ? `<div class="wc-review__sec"><div class="wc-review__t">Adjust words by hand ${info("Use the trash icon to remove a word. To merge: tick 2 or more words, then Merge selected \u2014 the most frequent becomes the main word (change it with \u2605).")}</div>
+        <div class="wc-rev__manual">${manRows}</div>
+        <div class="wc-rev__manualbar">
+          <button class="btn-sm wc-merge-go" disabled>Merge selected</button>
+        </div></div>` : ""}
     </div>`;
 
     el.querySelectorAll(".wc-rev-remove").forEach((b) =>
       b.addEventListener("click", () => this._setCleaningFlag(promptId, `removed/${b.dataset.term}/overridden`, b.dataset.to === "1")));
     el.querySelectorAll(".wc-rev-group").forEach((b) =>
       b.addEventListener("click", () => this._setCleaningFlag(promptId, `merges/${b.dataset.canon}/overridden`, b.dataset.to === "1")));
+    el.querySelectorAll(".wc-rev-delmerge").forEach((b) =>
+      b.addEventListener("click", () => this.removeMerge(promptId, b.dataset.canon)));
     el.querySelectorAll(".wc-rev-split").forEach((b) =>
       b.addEventListener("click", () => this._setCleaningFlag(promptId, `merges/${b.dataset.canon}/split/${b.dataset.mem}`, b.dataset.to === "1" ? true : null)));
+    el.querySelectorAll(".wc-rev-canon").forEach((b) =>
+      b.addEventListener("click", () => this.setCanonical(promptId, b.dataset.canon, b.dataset.mem)));
+    el.querySelectorAll(".wc-rev-manual").forEach((b) =>
+      b.addEventListener("click", () => this.manualRemove(promptId, b.dataset.term)));
+
+    const goBtn = el.querySelector(".wc-merge-go");
+    const checks = () => Array.from(el.querySelectorAll(".wc-merge-chk")).filter((c) => c.checked).map((c) => c.dataset.term);
+    el.querySelectorAll(".wc-merge-chk").forEach((c) =>
+      c.addEventListener("change", () => { if (goBtn) goBtn.disabled = checks().length < 2; }));
+    if (goBtn) goBtn.addEventListener("click", () => this.manualMerge(promptId, checks()));
+  },
+
+  // Delete a merge group entirely (removes it from the Merged list). Its members
+  // return to standing on their own. Not reversible from the panel, unlike Undo.
+  async removeMerge(promptId, canonKey) {
+    const session = this.viewSession;
+    if (!session || session === "(all)") return;
+    await this.db.ref(`control/word_cleaning/${session}/${promptId}/merges/${canonKey}`).remove();
+  },
+
+  // Manually merge selected processed terms into one group. Flattens correctly:
+  // if a selected term is itself an existing merge's canonical, its members are
+  // absorbed into the new group and the old group removed, so applyCleaning's
+  // single-level fold stays correct. Canonical = most frequent among selected.
+  async manualMerge(promptId, terms) {
+    const session = this.viewSession;
+    if (!session || session === "(all)") return;
+    const uniq = Array.from(new Set(terms || []));
+    if (uniq.length < 2) return;
+    const dec = ((this._cleaning || {})[session] || {})[promptId] || {};
+    const merges = dec.merges || {};
+    const proc = (this._wcFreqs && this._wcFreqs.promptId === promptId) ? (this._wcFreqs.processed || {}) : {};
+    let canon = uniq[0], best = -1;
+    uniq.forEach((t) => { const c = proc[t] || 0; if (c > best) { best = c; canon = t; } });
+
+    const members = {};
+    const toDelete = [];
+    uniq.forEach((t) => {
+      const g = merges[t];
+      if (g && !g.overridden) {                     // absorb an existing group's members
+        const list = Array.isArray(g.members) ? g.members : Object.keys(g.members || {});
+        list.forEach((mm) => { members[mm] = true; });
+        if (t !== canon) toDelete.push(t);
+      } else {
+        members[t] = true;
+      }
+    });
+    members[canon] = true;
+
+    const update = {
+      ts: firebase.database.ServerValue.TIMESTAMP,
+      [`merges/${canon}`]: { canonical: canon, members, split: {}, overridden: false }
+    };
+    toDelete.forEach((k) => { update[`merges/${k}`] = null; });
+    await this.db.ref(`control/word_cleaning/${session}/${promptId}`).update(update);
   },
 
   _downloadCSV(rows, filename) {
@@ -1429,7 +1768,7 @@ const Control = {
       ["assessments", assess, ["uid", "participant_no", "stimulus_id", ...dims, "session", "ts"]],
       ["choices", choices, ["uid", "participant_no", "question_id", "type", "choice_idx", "choice_text", "other_text", "session", "ts"]]
     ];
-    host.innerHTML = `<div class="card"><h2>Export (CSV)</h2><p class="hint">This session only. For SQLite .db and the full pipeline, use the Python dashboard.</p><div id="exp-btns" class="res-controls"></div></div>`;
+    host.innerHTML = `<div class="card"><h2>Export (CSV) ${info("This session only. For SQLite .db and the full pipeline, use the Python dashboard.")}</h2><div id="exp-btns" class="res-controls"></div></div>`;
     const btns = host.querySelector("#exp-btns");
     sets.forEach(([name, rows, cols]) => {
       const b = document.createElement("button"); b.className = "btn-sm";

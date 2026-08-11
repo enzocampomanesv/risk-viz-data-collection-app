@@ -4,7 +4,7 @@
    Phase 3-5 sections slot in without restructuring.
    ========================================================================= */
 
-/* ---------- tiny markdown renderer (subset used by consent text) ---------- */
+/* ---------- tiny markdown renderer (subset used by welcome / notice text) ---------- */
 function escapeHTML(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -66,13 +66,11 @@ const App = {
       const cred = await firebase.auth().signInAnonymously();
       this.state.uid = cred.user.uid;
 
-      // Current workshop/session id: control/session if set, else config default.
-      try {
-        const sSnap = await this.withTimeout(this.db.ref("control/session").once("value"), 8000, "Session read");
-        this.state.session = sSnap.val() || (config.study && config.study.default_session) || "default";
-      } catch (e) {
-        this.state.session = (config.study && config.study.default_session) || "default";
-      }
+      // Session is no longer read at boot. A participant belongs to whichever
+      // session they JOIN from the welcome screen (the host's active session).
+      // A returning participant's session is restored from their record in
+      // resume(). Until they join, this.state.session stays null and no write is
+      // attempted (and the rules would reject one anyway).
 
       // Gate master switch: control/gating_enabled overrides config.host_gating.enabled.
       // Read once for the initial state, then keep live (applies at the next section entry).
@@ -93,6 +91,18 @@ const App = {
 
       // Host "move everyone to section X now" override.
       this.watchForceSection();
+
+      // Host "reset all participants" signal. Baseline the current value at boot,
+      // then reload if the host pushes a newer reset timestamp (their record is
+      // cleared server-side, so the reload lands them back on the welcome screen).
+      try {
+        const r = await this.db.ref("control/reset").once("value");
+        this._resetBaseline = (typeof r.val() === "number") ? r.val() : 0;
+      } catch (e) { this._resetBaseline = 0; }
+      this.db.ref("control/reset").on("value", (s) => {
+        const v = (typeof s.val() === "number") ? s.val() : 0;
+        if (v > this._resetBaseline) window.location.reload();
+      });
 
       await this.resume();
       this.render();
@@ -126,6 +136,8 @@ const App = {
     }
     const p = snap.val() || {};
     this.state.participant = p;
+    // A returning participant keeps the session they joined.
+    if (p.session) this.state.session = p.session;
     this.state.sectionIndex = (p.progress && typeof p.progress.section_idx === "number")
       ? p.progress.section_idx : 0;
   },
@@ -141,16 +153,6 @@ const App = {
     if (!this.state.participant.created_at) this.state.participant.created_at = Date.now();
   },
 
-  async writeConsent(version) {
-    await this.db.ref(`participants/${this.state.uid}`).update({
-      created_at: this.state.participant.created_at || firebase.database.ServerValue.TIMESTAMP,
-      session: this.state.session,
-      consent: { version, ts: firebase.database.ServerValue.TIMESTAMP }
-    });
-    this.state.participant.consent = { version };
-    if (!this.state.participant.created_at) this.state.participant.created_at = Date.now();
-  },
-
   // RTDB keys can't contain . # $ / [ ]. Session names are free text (host-typed),
   // so sanitise before using one as the counter key. The readable participant_no
   // still uses the raw session string, so it stays exactly as the host named it.
@@ -159,8 +161,8 @@ const App = {
   // Assign a readable, per-workshop sequential id (e.g. "accra-001") exactly once.
   // The real Firebase uid stays the record key (and the security anchor); this is
   // just a friendly label stored alongside it. A transaction on the shared counter
-  // keeps numbers unique even when many phones consent in the same instant. The
-  // guard makes a page refresh (which re-runs consent only if not yet consented)
+  // keeps numbers unique even when many phones join in the same instant. The
+  // guard makes a page refresh (which re-runs join only if not yet joined)
   // never claim a second number.
   async assignParticipantNumber() {
     if (this.state.participant.participant_no) return this.state.participant.participant_no;
@@ -223,11 +225,20 @@ const App = {
   render() {
     this.detachGate();
     this.detachPres();
+    this.detachActiveSession();
     const cfg = this.state.config;
     const section = cfg.sections[this.state.sectionIndex];
     if (!section) return this.renderComplete();
+    if (section.type === "welcome") return this.renderWelcome(section);
     if (section.type === "assessment") return this.renderAssessmentFlow(section);
-    if (section.type === "wordcloud") return this.renderWordcloudFlow(section);
+    if (section.type === "wordcloud") {
+      // Host-paced activity: always hold participants until the host opens this
+      // section, independent of the master gating switch (which only governs
+      // self-paced questionnaire gates). renderGated shows the wait screen until
+      // control/section_gates/<id> is "open", then enters the word-cloud flow.
+      if (section.gate) return this.renderGated(section);
+      return this.renderWordcloudFlow(section);
+    }
     if (section.type === "notice") return this.renderNotice(section);
     if (this.isGated(section)) return this.renderGated(section);
     return this.renderSection(section);
@@ -235,6 +246,10 @@ const App = {
 
   detachPres() {
     if (this._presRef) { this._presRef.off("value", this._presHandler); this._presRef = null; this._presHandler = null; }
+  },
+
+  detachActiveSession() {
+    if (this._activeRef) { this._activeRef.off("value", this._activeHandler); this._activeRef = null; this._activeHandler = null; }
   },
 
   // Host-controlled visibility of the Back button on the "late" screens
@@ -315,7 +330,7 @@ const App = {
 
   renderSection(section) {
     switch (section.type) {
-      case "consent":       return this.renderConsent(section);
+      case "welcome":       return this.renderWelcome(section);
       case "questionnaire": return this.renderQuestionnaire(section);
       case "notice":        return this.renderNotice(section);
       case "assessment":    return this.renderAssessmentFlow(section);
@@ -838,38 +853,49 @@ const App = {
        ${withFooter ? this.footer() : ""}`;
   },
 
-  /* ----- consent ----- */
-  renderConsent(section) {
-    const c = this.state.config.consent;
-    let agreed = false;
-    this.mount(`
-      <div class="prose">${mdLite(c.markdown_text)}</div>
-      <div id="consent-check" class="consent-check" role="checkbox" tabindex="0" aria-checked="false">
-        <div class="consent-check__box"></div>
-        <div>${c.checkbox_label}</div>
-      </div>
-      <div class="actions">
-        <button id="consent-continue" class="btn btn--primary" disabled>Continue</button>
-      </div>
-    `);
-
-    const box = document.getElementById("consent-check");
-    const btn = document.getElementById("consent-continue");
-    const toggle = () => {
-      agreed = !agreed;
-      box.classList.toggle("consent-check--on", agreed);
-      box.setAttribute("aria-checked", String(agreed));
-      btn.disabled = !agreed;
+  /* ----- welcome (entry) -----
+     Replaces consent (consent is now read aloud in person). Shows configurable
+     copy and a "Join the <session> session" button that appears only while the
+     host has a session active. Joining sets the participant's session to the
+     active one and moves them into the study. */
+  renderWelcome(section) {
+    this.detachActiveSession();
+    const paint = (activeName) => {
+      const active = (typeof activeName === "string" && activeName) ? activeName : null;
+      this.mount(`
+        <div class="welcome">
+          ${section.title ? `<h1 class="title">${escapeHTML(section.title)}</h1>` : ""}
+          <div class="prose">${mdLite(section.body || "")}</div>
+          <div class="actions">
+            ${active
+              ? `<button id="join-btn" class="btn btn--primary">Join the ${escapeHTML(active)} session</button>`
+              : `<div class="welcome__wait muted">No session is open yet. Please wait for the facilitator to start the session.</div>`}
+          </div>
+        </div>
+      `);
+      if (active) {
+        const btn = document.getElementById("join-btn");
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          try { await this.join(active); }
+          catch (e) { btn.disabled = false; this.renderError(e.message); }
+        });
+      }
     };
-    box.addEventListener("click", toggle);
-    box.addEventListener("keydown", (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggle(); } });
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      await this.writeConsent(c.version);
-      await this.assignParticipantNumber();
-      await this.setProgress(this.state.sectionIndex + 1);
-      this.render();
-    });
+    this._activeRef = this.db.ref("control/active_session");
+    this._activeHandler = (s) => paint(s.val());
+    this._activeRef.on("value", this._activeHandler);
+  },
+
+  async join(activeName) {
+    this.detachActiveSession();
+    this.state.session = activeName;
+    // The first write MUST carry the session (the rules freeze writes whose
+    // session != the active one). setProgress establishes the participant record
+    // with created_at + session + progress; then the readable number is patched.
+    await this.setProgress(this.state.sectionIndex + 1);
+    await this.assignParticipantNumber();
+    this.render();
   },
 
   /* ----- word_prompt question: chip input, one question per step ----- */

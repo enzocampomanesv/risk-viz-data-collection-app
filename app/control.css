@@ -73,8 +73,8 @@
 .ctrl-subtab--on { color: var(--color-accent-contrast); background: var(--color-accent); border-color: var(--color-accent); }
 
 /* Collapsible cards: click the header to fold the body away. */
-.card > h2 { cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between; }
-.card > h2::after { content: "▾"; color: var(--color-muted); font-size: 0.8em; margin-left: 0.5rem; }
+.card > h2 { cursor: pointer; user-select: none; display: flex; align-items: center; }
+.card > h2::after { content: "▾"; color: var(--color-muted); font-size: 0.8em; margin-left: auto; padding-left: 0.5rem; }
 .card--collapsed > h2 { margin-bottom: 0; }
 .card--collapsed > h2::after { content: "▸"; }
 .card--collapsed > *:not(h2) { display: none !important; }
@@ -170,3 +170,80 @@
 .wc-rev__mem { margin-left: 0.3rem; }
 .wc-rev__mem--split { text-decoration: line-through; opacity: 0.6; }
 .wc-rev__mem .btn-sm, .wc-rev__row .btn-sm { padding: 0.1rem 0.4rem; font-size: 0.72rem; }
+.wc-rev__manual { display: flex; flex-wrap: wrap; gap: 0.4rem; max-height: 180px; overflow-y: auto; padding: 0.2rem; }
+.wc-rev__chip { display: inline-flex; align-items: center; gap: 0.35rem; border: 1px solid var(--color-border); border-radius: 999px; padding: 0.15rem 0.5rem; font-size: 0.82rem; }
+.wc-rev__chip .btn-sm { padding: 0.05rem 0.4rem; font-size: 0.68rem; }
+
+/* ---- session manager ---- */
+.session-list { margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.session-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.4rem 0.6rem; border: 1px solid var(--color-border); border-radius: 8px; }
+.session-row--on { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+.session-row__name { font-weight: 600; display: flex; align-items: center; gap: 0.5rem; }
+
+/* ---- persistent facilitation panel ---- */
+.facil { border: 1px solid var(--color-border); border-radius: 10px; margin-bottom: 1rem; background: var(--color-surface); position: sticky; top: 0.5rem; z-index: 20; }
+.facil__bar { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.4rem 0.6rem; flex-wrap: wrap; }
+.facil__togglebtn { display: flex; align-items: center; gap: 0.4rem; background: none; border: none; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--color-text); padding: 0.2rem; white-space: nowrap; }
+.facil__chev { color: var(--color-muted); }
+.facil__summary { font-weight: 600; }
+.facil__quick { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.facil__quick .btn-sm { font-size: 0.75rem; padding: 0.25rem 0.55rem; }
+.facil__bcinput { font-size: 0.8rem; padding: 0.28rem 0.5rem; border: 1px solid var(--color-border); border-radius: 6px; min-width: 180px; background: var(--color-bg); color: var(--color-text); }
+.facil__moveselect { font-size: 0.78rem; padding: 0.25rem 0.4rem; border: 1px solid var(--color-border); border-radius: 6px; max-width: 150px; background: var(--color-bg); color: var(--color-text); }
+.facil__sep { width: 1px; align-self: stretch; background: var(--color-border); margin: 0 0.2rem; }
+.facil__bccur { font-size: 0.75rem; color: var(--color-muted); padding: 0 0.7rem; }
+.facil__bccur:empty { display: none; }
+.facil__body { padding: 0.2rem 0.8rem 0.8rem; font-size: 0.85rem; }
+.facil--collapsed .facil__body { display: none; }
+.facil__sec { border-top: 1px solid var(--color-border); padding-top: 0.6rem; margin-top: 0.6rem; }
+.facil__sec:first-child { border-top: none; margin-top: 0.2rem; }
+.facil__h { font-weight: 600; font-size: 0.85rem; margin-bottom: 0.4rem; }
+
+/* ---- session row actions + danger zone ---- */
+.session-row__acts { display: flex; gap: 0.4rem; }
+.danger summary { cursor: pointer; color: var(--color-danger, #c0392b); font-weight: 600; font-size: 0.9rem; }
+.danger { margin-top: 0.3rem; }
+.danger .field { margin-top: 0.6rem; }
+
+/* ---- manual merge in the cleaning review ---- */
+.wc-rev__pick { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+.wc-rev__pick input { margin: 0; }
+.wc-rev__manualbar { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.6rem; flex-wrap: wrap; }
+
+/* ---- icon buttons in the cleaning review ---- */
+.btn-icon { display: inline-flex; align-items: center; justify-content: center; padding: 0.2rem 0.35rem; line-height: 0; }
+.btn-icon .ic { display: block; }
+.wc-rev__canon .ic { vertical-align: -2px; }
+
+/* red X for remove actions; gold star for the main word */
+.btn-icon--danger { color: var(--color-danger, #c0392b); }
+.wc-rev__canon .ic { color: #e0a100; vertical-align: -2px; }
+.wc-rev-canon { color: #b8860b; }
+
+/* ---- info popovers (hide instructional text until asked for) ---- */
+.info { position: relative; display: inline-flex; vertical-align: middle; margin-left: 0.35rem; }
+.info__btn {
+  width: 15px; height: 15px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--color-border); background: var(--color-surface);
+  color: var(--color-muted); font: italic 700 0.72rem/1 Georgia, "Times New Roman", serif;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.info__btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.info__pop {
+  position: absolute; top: 135%; left: 0; z-index: 40; display: none;
+  width: max-content; max-width: 280px; padding: 0.5rem 0.65rem;
+  font-size: 0.78rem; font-weight: 400; font-style: normal; line-height: 1.4;
+  letter-spacing: normal; text-transform: none;
+  color: var(--color-text);
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.14); white-space: normal; text-align: left;
+}
+.info--open .info__pop { display: block; }
+
+/* divider between merged words */
+.wc-rev__sep { color: var(--color-border); margin: 0 0.35rem; font-weight: 400; }
+.wc-rev__group { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.15rem; }
+.wc-rev__mem, .wc-rev__canon { display: inline-flex; align-items: center; gap: 0.2rem; }
+
+/* word cloud action rows: redraw/png/csv then clean/broadcast */
+.res-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
