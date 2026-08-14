@@ -17,15 +17,15 @@
     "dimensions": [
       {
         "id": "clarity",
-        "label": "Clarity: Do you think this is easy to understand?"
+        "label": "Do you think this is easy to understand?"
       },
       {
         "id": "usefulness",
-        "label": "Usefulness: Would this help you prepare for or respond to flooding?"
+        "label": "Would this help you prepare for or respond to flooding?"
       },
       {
         "id": "trust",
-        "label": "Trust: Do you trust this?"
+        "label": "Do you trust this?"
       }
     ]
   },
@@ -53,13 +53,6 @@
       "label": "Flood experience & information"
     },
     {
-      "id": "wordcloud",
-      "type": "wordcloud",
-      "orientation": "portrait",
-      "gate": true,
-      "label": "Word cloud"
-    },
-    {
       "id": "completion1",
       "type": "notice",
       "orientation": "portrait",
@@ -76,6 +69,13 @@
       "label": "Welcome back",
       "title_key": "notice_welcome_title",
       "body_key": "notice_welcome_body"
+    },
+    {
+      "id": "wordcloud",
+      "type": "wordcloud",
+      "orientation": "portrait",
+      "gate": true,
+      "label": "Word cloud"
     },
     {
       "id": "assessment",

@@ -89,8 +89,14 @@ const App = {
       // Host-controlled Back-button visibility (questionnaire / end).
       this.watchBackFlags();
 
-      // Host "move everyone to section X now" override.
-      this.watchForceSection();
+      // Presence: mark this participant connected (auto-cleared on disconnect) so
+      // the host's monitor only counts people who are actually online.
+      this.setupPresence();
+
+      // Last force-section move this device has applied (persisted so a reload
+      // doesn't re-apply an old move, but a move that happened while offline is
+      // still caught up on reconnect).
+      this._forceSeenTs = this._readForceTs();
 
       // Host "reset all participants" signal. Baseline the current value at boot,
       // then reload if the host pushes a newer reset timestamp (their record is
@@ -105,6 +111,12 @@ const App = {
       });
 
       await this.resume();
+
+      // Host "move everyone to section X now" override. Attached after resume()
+      // so this.state.session is known when it first evaluates — that lets a
+      // resuming participant catch up to a move made while they were offline.
+      this.watchForceSection();
+
       this.render();
     } catch (e) {
       this.renderError(e.message);
@@ -140,6 +152,24 @@ const App = {
     if (p.session) this.state.session = p.session;
     this.state.sectionIndex = (p.progress && typeof p.progress.section_idx === "number")
       ? p.progress.section_idx : 0;
+    // Preload this participant's saved word answers (both the host-paced word-cloud
+    // prompts and self-paced questionnaire word_prompts) so a refresh restores them
+    // instead of showing empty inputs and inviting a double-submission.
+    this._savedWords = {};
+    try {
+      const ws = await this.db.ref(`word_responses/${this.state.uid}`).once("value");
+      const all = ws.val() || {};
+      Object.keys(all).forEach((pid) => {
+        if (all[pid] && Array.isArray(all[pid].words)) this._savedWords[pid] = all[pid].words.slice();
+      });
+    } catch (e) { /* non-fatal: inputs just start empty */ }
+    // Non-profile choice answers live under choices/<uid> (as option indices);
+    // preload them too so those questions restore their selection on refresh.
+    this._savedChoices = {};
+    try {
+      const cs = await this.db.ref(`choices/${this.state.uid}`).once("value");
+      this._savedChoices = cs.val() || {};
+    } catch (e) { /* non-fatal */ }
   },
 
   /* ----- progress / writes ----- */
@@ -151,6 +181,8 @@ const App = {
       progress: { section_idx: idx }
     });
     if (!this.state.participant.created_at) this.state.participant.created_at = Date.now();
+    // Mirror the reset progress node (a section change clears the saved q_step).
+    this.state.participant.progress = { section_idx: idx };
   },
 
   // RTDB keys can't contain . # $ / [ ]. Session names are free text (host-typed),
@@ -230,7 +262,12 @@ const App = {
     const section = cfg.sections[this.state.sectionIndex];
     if (!section) return this.renderComplete();
     if (section.type === "welcome") return this.renderWelcome(section);
-    if (section.type === "assessment") return this.renderAssessmentFlow(section);
+    if (section.type === "assessment") {
+      // Host-paced activity: always hold until the host opens this section,
+      // independent of the master gating switch (same as the word cloud).
+      if (section.gate) return this.renderGated(section);
+      return this.renderAssessmentFlow(section);
+    }
     if (section.type === "wordcloud") {
       // Host-paced activity: always hold participants until the host opens this
       // section, independent of the master gating switch (which only governs
@@ -295,16 +332,37 @@ const App = {
   //    a section_id that resolves to a real section.
   //  - Preserves already-persisted answers; it only moves the section pointer,
   //    then re-seeds the target section's sub-state (mirroring prevSection).
+  // Mark this participant present while connected; clear automatically on
+  // disconnect so the host monitor doesn't count ghosts.
+  setupPresence() {
+    const uid = this.state.uid;
+    if (!uid) return;
+    const presRef = this.db.ref("presence/" + uid);
+    this.db.ref(".info/connected").on("value", (s) => {
+      if (s.val() === true) {
+        presRef.onDisconnect().remove();
+        presRef.set(true).catch(() => {});
+      }
+    });
+  },
+
+  _readForceTs() {
+    try { return Number(localStorage.getItem("RISKVIZ_FORCE_TS") || 0) || 0; }
+    catch (e) { return 0; }
+  },
+  _writeForceTs(ts) {
+    this._forceSeenTs = ts;
+    try { localStorage.setItem("RISKVIZ_FORCE_TS", String(ts)); } catch (e) { /* ignore */ }
+  },
+
   watchForceSection() {
-    let baselineSet = false;
     this.db.ref("control/force_section").on("value", (snap) => {
       const v = snap.val();
       const ts = (v && typeof v.ts === "number") ? v.ts : 0;
-      if (!baselineSet) { this._forceSeenTs = ts; baselineSet = true; return; }
       if (!v || !v.section_id) return;
       if (v.session !== this.state.session) return;          // scoped to this session
-      if (!(ts > (this._forceSeenTs || 0))) return;          // one-shot: newer events only
-      this._forceSeenTs = ts;
+      if (!(ts > (this._forceSeenTs || 0))) return;          // apply only moves newer than the last one applied
+      this._writeForceTs(ts);                                // remember, so a reload doesn't re-apply it
       const idx = this.state.config.sections.findIndex((s) => s.id === v.section_id);
       if (idx < 0) return;                                   // unknown section id — ignore
       this.setProgress(idx)
@@ -349,14 +407,21 @@ const App = {
      an optional free-text "Other"), and word_prompt. */
   renderQuestionnaire(section) {
     const q = this.state.q;
-    // Entering a different questionnaire section (forward completion or a
-    // force-move) restarts at its first question. Intra-section navigation keeps
-    // q.step, so this only fires on an actual section change.
-    if (q.sectionId !== section.id) { q.sectionId = section.id; q.step = 0; q.reviewing = false; }
+    // Entering a questionnaire section (forward completion, force-move, or a page
+    // refresh) resumes at the exact question the participant last viewed in this
+    // section (persisted under progress). A section they haven't started opens at
+    // its first question. Intra-section navigation keeps q.step.
+    if (q.sectionId !== section.id) {
+      q.sectionId = section.id; q.reviewing = false;
+      const prog = (this.state.participant && this.state.participant.progress) || {};
+      q.step = (prog.q_section === section.id && typeof prog.q_step === "number") ? prog.q_step : 0;
+    }
     const questions = section.questions || [];
     if (!questions.length) { this.setProgress(this.state.sectionIndex + 1).then(() => this.render()); return; }
+    if (q.step < 0) q.step = 0;
     if (q.step >= questions.length) q.step = questions.length - 1;
     if (q.reviewing) return this.renderReviewSummary(section);
+    this._persistStep(section);
     const question = questions[q.step];
     switch (question.type) {
       case "word_prompt":     return this.renderWordQuestion(section, question);
@@ -364,6 +429,50 @@ const App = {
       case "multiple_choice": return this.renderChoiceQuestion(section, question, true);
       default:                return this.renderError(`Unknown question type: ${question.type}`);
     }
+  },
+
+  // Persist the currently-viewed question so a refresh returns to it exactly.
+  // Stored beside section_idx; setProgress (a section change) naturally clears it.
+  _persistStep(section) {
+    const prog = (this.state.participant && this.state.participant.progress) || {};
+    if (prog.q_section === section.id && prog.q_step === this.state.q.step) return;   // unchanged
+    prog.q_section = section.id; prog.q_step = this.state.q.step;
+    this.state.participant = this.state.participant || {};
+    this.state.participant.progress = prog;
+    this.db.ref(`participants/${this.state.uid}/progress`)
+      .update({ q_section: section.id, q_step: this.state.q.step })
+      .catch(() => {});
+  },
+
+  // Rebuild a choice question's in-memory selection (option indices + Other text)
+  // from its stored answer: profile questions store plain choice texts under
+  // participants/fields; other choice questions store option indices under choices.
+  _restoreChoiceAnswer(question, isMulti) {
+    const choices = question.choices || [];
+    const blank = isMulti ? { idxs: [], other: "" } : { idx: null, other: "" };
+    const otherIdx = choices.length;
+    if (!question.profile) {
+      const rec = (this._savedChoices || {})[question.id];
+      if (!rec) return blank;
+      if (isMulti) return { idxs: Array.isArray(rec.choice_idxs) ? rec.choice_idxs.slice() : [], other: rec.other_text || "" };
+      return { idx: (typeof rec.choice_idx === "number") ? rec.choice_idx : null, other: rec.other_text || "" };
+    }
+    const stored = ((this.state.participant || {}).fields || {})[question.id];
+    if (stored === undefined || stored === null || stored === "") return blank;
+    const findIdx = (val) => {
+      const v = String(val);
+      for (let i = 0; i < choices.length; i++) if (ConfigLoader.stripMarkup(choices[i]) === v) return i;
+      return question.has_other ? otherIdx : -1;   // unmatched → the Other slot
+    };
+    if (isMulti) {
+      const vals = Array.isArray(stored) ? stored : [stored];
+      const idxs = []; let other = "";
+      vals.forEach((val) => { const i = findIdx(val); if (i < 0) return; idxs.push(i); if (i === otherIdx) other = String(val); });
+      return { idxs, other };
+    }
+    const i = findIdx(stored);
+    if (i < 0) return blank;
+    return { idx: i, other: i === otherIdx ? String(stored) : "" };
   },
 
   // Shared navigation for questionnaire questions.
@@ -397,7 +506,7 @@ const App = {
     const otherIdx = choices.length;   // the "Other" slot, if present
 
     if (!q.answers[question.id]) {
-      q.answers[question.id] = isMulti ? { idxs: [], other: "" } : { idx: null, other: "" };
+      q.answers[question.id] = this._restoreChoiceAnswer(question, isMulti);
     }
     const ans = q.answers[question.id];
     const isSelected = (i) => isMulti ? ans.idxs.includes(i) : ans.idx === i;
@@ -767,9 +876,16 @@ const App = {
     const maxW = p.max_words || 5, minW = p.min_words || 1, maxC = p.max_chars || 30;
 
     this.state.wc = this.state.wc || {};
-    if (!this.state.wc[p.id]) this.state.wc[p.id] = [];
-    const words = this.state.wc[p.id];
     this._wcSubmitted = this._wcSubmitted || {};
+    // Restore a previous submission for this prompt (e.g. after a page refresh)
+    // from the words preloaded at resume, so the participant sees their saved
+    // words instead of an empty box and doesn't re-enter/double-submit.
+    if (!this.state.wc[p.id]) {
+      const saved = (this._savedWords && this._savedWords[p.id]) ? this._savedWords[p.id].slice() : [];
+      this.state.wc[p.id] = saved;
+      if (saved.length) this._wcSubmitted[p.id] = true;
+    }
+    const words = this.state.wc[p.id];
 
     this.mount(`
       <div class="disc__counter muted">${n ? (idx + 1) + " / " + n : ""}</div>
@@ -890,6 +1006,15 @@ const App = {
   async join(activeName) {
     this.detachActiveSession();
     this.state.session = activeName;
+    // Baseline the force-section clock to "now" for this session, so a move the
+    // host made before this person joined isn't retroactively applied to them
+    // (on this load or a later reload). Later moves still apply.
+    try {
+      const f = await this.db.ref("control/force_section").once("value");
+      const fv = f.val();
+      const fts = (fv && typeof fv.ts === "number" && fv.session === activeName) ? fv.ts : 0;
+      this._writeForceTs(Math.max(this._forceSeenTs || 0, fts));
+    } catch (e) { /* keep current baseline */ }
     // The first write MUST carry the session (the rules freeze writes whose
     // session != the active one). setProgress establishes the participant record
     // with created_at + session + progress; then the readable number is patched.
@@ -929,7 +1054,9 @@ const App = {
     const addBtn = document.getElementById("wa-add");
     const chipsEl = document.getElementById("wa-chips");
     const counterEl = document.getElementById("wa-counter");
-    input.maxLength = maxC;
+    // Allow typing/pasting a comma-separated list; each resulting chip is still
+    // capped at maxC (enforced per token in add()).
+    input.maxLength = Math.max(maxC, maxC * maxW + maxW * 2);
 
     const refresh = () => {
       chipsEl.innerHTML = words.map((w, i) =>
@@ -941,17 +1068,28 @@ const App = {
       counterEl.textContent = `${words.length} of ${maxW} entr${maxW === 1 ? "y" : "ies"} · up to ${maxC} characters each`;
       const atMax = words.length >= maxW;
       input.disabled = atMax; addBtn.disabled = atMax;
-      input.placeholder = atMax ? "Maximum reached" : "Type a word";
+      input.placeholder = atMax ? "Maximum reached" : "Type a word (commas add several)";
       if (onChange) onChange();
     };
+    // Commit the field: split on commas/semicolons so one multi-concept entry
+    // becomes several chips. Each token is trimmed, capped at maxC, de-duplicated
+    // (case-insensitive), and added until the max-words cap is reached.
     const add = () => {
-      const raw = (input.value || "").trim().slice(0, maxC);
-      if (!raw || words.length >= maxW) { input.value = ""; return; }
-      if (words.some((w) => w.toLowerCase() === raw.toLowerCase())) { input.value = ""; return; }
-      words.push(raw); input.value = ""; refresh(); input.focus();
+      const tokens = (input.value || "").split(/[,;]+/).map((t) => t.trim().slice(0, maxC)).filter((t) => t.length > 0);
+      input.value = "";
+      let added = false;
+      for (const tok of tokens) {
+        if (words.length >= maxW) break;
+        if (words.some((w) => w.toLowerCase() === tok.toLowerCase())) continue;
+        words.push(tok); added = true;
+      }
+      if (added) refresh();
+      input.focus();
     };
     addBtn.addEventListener("click", add);
-    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === "," || e.key === ";") { e.preventDefault(); add(); }
+    });
     refresh();
     return refresh;
   },
@@ -961,7 +1099,10 @@ const App = {
     const maxW = question.max_words || 5;
     const minW = question.min_words || 1;
     const maxC = question.max_chars || 30;
-    if (!q.answers[question.id]) q.answers[question.id] = [];
+    if (!q.answers[question.id]) {
+      const saved = (this._savedWords && this._savedWords[question.id]) ? this._savedWords[question.id].slice() : [];
+      q.answers[question.id] = saved;
+    }
     const words = q.answers[question.id];
 
     this.mount(`
@@ -1020,17 +1161,22 @@ const App = {
         ? `<img class="broadcast__img" src="${escapeHTML(b.image)}" alt="Word cloud from the facilitator" />`
         : `<div class="broadcast__label">Message from the facilitator</div>
            <div class="broadcast__msg">${escapeHTML(b.text)}</div>`;
+      const closable = !b.locked;
       el.innerHTML = `
         <div class="broadcast__box ${b.image ? "broadcast__box--image" : ""}" role="alertdialog" aria-modal="true">
           ${body}
-          <button id="broadcast-close" class="btn btn--primary">Close</button>
+          ${closable
+            ? `<button id="broadcast-close" class="btn btn--primary">Close</button>`
+            : `<div class="broadcast__msg muted" style="margin-top:.6rem">The facilitator will close this.</div>`}
         </div>`;
       el.style.display = "flex";
-      document.getElementById("broadcast-close").addEventListener("click", () => {
-        this._dismissedBroadcastTs = b.ts;
-        el.style.display = "none";
-        el.innerHTML = "";
-      });
+      if (closable) {
+        document.getElementById("broadcast-close").addEventListener("click", () => {
+          this._dismissedBroadcastTs = b.ts;
+          el.style.display = "none";
+          el.innerHTML = "";
+        });
+      }
     } else if (!hasContent) {
       el.style.display = "none";
       el.innerHTML = "";

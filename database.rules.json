@@ -89,6 +89,14 @@
       }
     },
 
+    "presence": {
+      ".read": "auth != null && auth.token.admin === true",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.isBoolean()"
+      }
+    },
+
     "sessions": {
       ".read": "auth != null",
       ".write": "auth != null && auth.token.admin === true",
@@ -123,6 +131,7 @@
         "text":   { ".validate": "newData.isString() && newData.val().length <= 500" },
         "image":  { ".validate": "newData.isString() && newData.val().length <= 1400000" },
         "label":  { ".validate": "newData.isString() && newData.val().length <= 200" },
+        "locked": { ".validate": "newData.isBoolean()" },
         "ts":     { ".validate": "newData.isNumber()" },
         "$other": { ".validate": false }
       },

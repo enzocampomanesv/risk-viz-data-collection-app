@@ -117,7 +117,7 @@
       "id": "flood_freq",
       "section": "questions",
       "type": "single_choice",
-      "prompt": "How often have floods affected you or your household?",
+      "prompt": "How often have you and your household been affected by floods in this community?",
       "image": null,
       "choices": [
         "Never",
@@ -162,7 +162,7 @@
       "id": "info_recv",
       "section": "questions",
       "type": "word_prompt",
-      "prompt": "Which type of flood-related information do you currently receive?",
+      "prompt": "What type of information do you currently receive regarding floods or extreme weather that leads to floods (storm, tide, opening of dam, etc.)?",
       "image": null,
       "max_words": 5,
       "min_words": 1,
@@ -193,7 +193,7 @@
     {
       "id": "when_use",
       "section": "questions",
-      "type": "single_choice",
+      "type": "multiple_choice",
       "prompt": "When do you normally use the flood-related information?",
       "image": null,
       "choices": [

@@ -123,7 +123,7 @@ const Control = {
 
   /* ----------------------------- panel ----------------------------- */
   renderPanel() {
-    const gated = this.config.sections.filter((s) => s.gate && s.type !== "assessment" && s.type !== "notice");
+    const gated = this.config.sections.filter((s) => s.gate && s.type !== "notice");
     const assess = this.config.sections.find((s) => s.type === "assessment");
     const stimuli = assess ? (assess.stimuli || []) : [];
     const wc = this.config.sections.find((s) => s.type === "wordcloud");
@@ -586,15 +586,17 @@ const Control = {
     if (pill) { pill.textContent = shown ? "SHOWN" : "HIDDEN"; pill.className = "pill " + (shown ? "pill--open" : "pill--locked"); }
     if (btn) { btn.textContent = shown ? "Hide scale" : "Show scale"; btn.className = "btn-sm " + (shown ? "" : "btn-sm--accent"); }
 
-    // Live submission count for the current figure (informational, not a block).
+    // Live submission count for the current figure (connected participants only,
+    // so n never exceeds M when someone answers then disconnects).
     const countEl = document.getElementById("as-count");
     if (countEl) {
       const stimId = st.id;
-      const inSession = this.state.participants.filter((p) => (p.session || "") === this.state.session).length;
-      let answered = 0;
+      const connected = this.connectedInSession();
+      const inSession = connected.length;
       const assessData = this.results && this.results.assess ? this.results.assess : (this._assessLive || {});
-      Object.keys(assessData || {}).forEach((uid) => {
-        const rec = (assessData[uid] || {})[stimId];
+      let answered = 0;
+      connected.forEach((p) => {
+        const rec = (assessData[p.uid] || {})[stimId];
         if (rec && (rec.session || "") === this.state.session) answered++;
       });
       countEl.textContent = stimId ? `Answered this figure: ${answered}${inSession ? " of " + inSession : ""}` : "";
@@ -635,11 +637,12 @@ const Control = {
     const countEl = document.getElementById("wc-count");
     if (countEl) {
       const pid = p.id;
-      const inSession = this.state.participants.filter((x) => (x.session || "") === this.state.session).length;
+      const connected = this.connectedInSession();
+      const inSession = connected.length;
       const wordData = (this.results && this.results.words) ? this.results.words : (this._wordLive || {});
       let answered = 0;
-      Object.keys(wordData || {}).forEach((uid) => {
-        const rec = (wordData[uid] || {})[pid];
+      connected.forEach((x) => {
+        const rec = (wordData[x.uid] || {})[pid];
         if (rec && (rec.session || "") === this.state.session) answered++;
       });
       countEl.textContent = pid ? `Answered this prompt: ${answered}${inSession ? " of " + inSession : ""}` : "";
@@ -676,7 +679,7 @@ const Control = {
       const input = document.getElementById("bc-text");
       const text = input.value.trim();
       if (!text) return;
-      await this.db.ref("control/broadcast").set({ text, ts: firebase.database.ServerValue.TIMESTAMP });
+      await this.db.ref("control/broadcast").set({ text, locked: !!this._bcLock, ts: firebase.database.ServerValue.TIMESTAMP });
       input.value = "";
     };
     document.getElementById("bc-send").addEventListener("click", send);
@@ -800,7 +803,7 @@ const Control = {
     this.db.ref("participants").on("value", (s) => {
       const all = s.val() || {};
       this.state.participantsRaw = all;
-      this.state.participants = Object.keys(all).map((uid) => all[uid]);
+      this.state.participants = Object.keys(all).map((uid) => Object.assign({ uid: uid }, all[uid]));
       // Participant progress and participant_no changes arrive here — flag the
       // live view dirty so the Results tab reflects them on the next 3s tick.
       this._dirty = true;
@@ -808,13 +811,42 @@ const Control = {
       this.paintAssessCard();
       this.paintWcCard();
     });
+
+    // Presence: which participants are connected right now. Ghosts (closed tabs,
+    // disconnected phones) drop out and reappear when they reconnect. If the
+    // presence node can't be read (e.g. rules not yet deployed) we fall back to
+    // counting everyone rather than showing zero.
+    this._presenceReady = false;
+    this.db.ref("presence").on("value", (s) => {
+      this._presence = s.val() || {};
+      this._presenceReady = true;
+      this.renderMonitor();
+      this.paintAssessCard();
+      this.paintWcCard();
+    }, () => {
+      this._presence = {};
+      this._presenceReady = false;   // read denied — don't hide anyone
+      this.renderMonitor();
+      this.paintAssessCard();
+      this.paintWcCard();
+    });
+  },
+
+  // In-session participants who are connected right now (used for all live counts
+  // so the host isn't misled by ghosts). Until presence has loaded successfully,
+  // everyone in the session is counted (avoids a misleading zero).
+  connectedInSession() {
+    const inSession = this.state.participants.filter((p) => (p.session || "") === this.state.session);
+    if (!this._presenceReady) return inSession;
+    const pres = this._presence || {};
+    return inSession.filter((p) => pres[p.uid]);
   },
 
   renderMonitor() {
     const el = document.getElementById("monitor");
     if (!el) return;
     const sections = this.config.sections;
-    const inSession = this.state.participants.filter((p) => (p.session || "") === this.state.session);
+    const inSession = this.connectedInSession();
 
     const counts = sections.map(() => 0);
     let waiting = sections.map(() => 0);
@@ -824,7 +856,13 @@ const Control = {
       if (idx >= sections.length) { done++; return; }
       counts[idx]++;
       const sec = sections[idx];
-      if (this.state.gatingEnabled && sec.gate && sec.type !== "assessment" && sec.type !== "notice" && this.state.gates[sec.id] !== "open") waiting[idx]++;
+      // A participant is "waiting" if held at a gated, locked section. Host-paced
+      // sections (word cloud, assessment) always hold; questionnaire gates hold
+      // only when the master switch is on. Notices are host-advanced, never held.
+      const hostPaced = (sec.type === "wordcloud" || sec.type === "assessment");
+      const held = sec.gate && this.state.gates[sec.id] !== "open"
+        && (hostPaced || (this.state.gatingEnabled && sec.type === "questionnaire"));
+      if (held) waiting[idx]++;
     });
 
     const rows = sections.map((s, i) => {
@@ -999,6 +1037,7 @@ const Control = {
       <div class="res-actions">
         <button id="wc-clean" class="btn-sm btn-sm--accent">🧹 Clean words (AI)</button>
         <button id="wc-broadcast" class="btn-sm btn-sm--accent">📡 Broadcast to participants</button>
+        <button id="wc-bc-lock" class="btn-sm" title="Whether participants can close the broadcast themselves">…</button>
       </div>
       <div id="wc-clean-status" class="hint"></div>
       <details class="wc-ai-setup">
@@ -1027,6 +1066,15 @@ const Control = {
     card.querySelector("#wc-export").addEventListener("click", () => this.exportWordcloudPNG());
     card.querySelector("#wc-export-csv").addEventListener("click", () => this.exportWordcloudCSV());
     card.querySelector("#wc-broadcast").addEventListener("click", () => this.broadcastWordcloud());
+    const lockBtn = card.querySelector("#wc-bc-lock");
+    if (this._bcLock === undefined) this._bcLock = localStorage.getItem("RISKVIZ_BC_LOCK") === "1";
+    const paintLock = () => { lockBtn.textContent = this._bcLock ? "🔒 Host closes" : "🔓 Users can close"; };
+    paintLock();
+    lockBtn.addEventListener("click", () => {
+      this._bcLock = !this._bcLock;
+      localStorage.setItem("RISKVIZ_BC_LOCK", this._bcLock ? "1" : "0");
+      paintLock();
+    });
     this.wireAiSetup();
     update();
   },
@@ -1108,6 +1156,35 @@ const Control = {
   // Apply the active (non-overridden) cleaning decisions for a prompt to a raw
   // {word: count} map: drop removed terms, fold merged members into their
   // canonical. Returns a new map; the raw map is untouched.
+  // Returns a function that maps a raw word to its processed form for a prompt:
+  // null if removed, the main (canonical) word if merged, else the word itself.
+  // Mirrors applyCleaning's single-level fold, scoped to the viewed session.
+  _cleaningResolver(promptId) {
+    const dec = ((this._cleaning || {})[this.viewSession] || {})[promptId] || {};
+    const removed = dec.removed || {}, merges = dec.merges || {};
+    const removeSet = {}, termMap = {};
+    Object.keys(removed).forEach((t) => { if (!removed[t].overridden) removeSet[t] = true; });
+    Object.keys(merges).forEach((canon) => {
+      const m = merges[canon]; if (m.overridden) return;
+      const members = Array.isArray(m.members) ? m.members : Object.keys(m.members || {});
+      const split = m.split || {};
+      members.forEach((mem) => { if (mem !== m.canonical && !split[mem]) termMap[mem] = m.canonical; });
+    });
+    return (rawWord) => {
+      const w = this._termKey(rawWord);
+      if (!w || removeSet[w]) return null;
+      return termMap[w] || w;
+    };
+  },
+
+  // Normalize a raw word into a term key: lowercase, and replace characters that
+  // RTDB forbids in keys (. # $ / [ ]) with a space, then collapse. Used
+  // everywhere a word becomes a key (aggregation + cleaning) so they stay in sync.
+  // Raw participant text is preserved separately in the raw exports.
+  _termKey(w) {
+    return String(w == null ? "" : w).toLowerCase().replace(/[.#$\/\[\]]/g, " ").replace(/\s+/g, " ").trim();
+  },
+
   applyCleaning(promptId, rawMap) {
     const dec = ((this._cleaning || {})[this.viewSession] || {})[promptId];
     if (!dec) return Object.assign({}, rawMap);
@@ -1144,7 +1221,7 @@ const Control = {
       if (!this.sessOK(rec)) return;
       this.groupValuesFor(uid, groupField, labelMap).forEach((g) => {
         rawGroups[g] = rawGroups[g] || {};
-        (rec.words || []).forEach((w) => { const k = String(w).toLowerCase(); rawGroups[g][k] = (rawGroups[g][k] || 0) + 1; });
+        (rec.words || []).forEach((w) => { const k = this._termKey(w); if (k) rawGroups[g][k] = (rawGroups[g][k] || 0) + 1; });
       });
     });
     // Processed groups = raw with active cleaning decisions applied.
@@ -1240,6 +1317,7 @@ const Control = {
     try {
       await this.db.ref("control/broadcast").set({
         image: dataUrl,
+        locked: !!this._bcLock,
         ts: firebase.database.ServerValue.TIMESTAMP
       });
       if (status) status.textContent = "Broadcast sent. Use the Broadcast card's Clear to remove it.";
@@ -1255,7 +1333,7 @@ const Control = {
     Object.keys(this.results.words || {}).forEach((uid) => {
       const rec = (this.results.words[uid] || {})[promptId];
       if (!this.sessOK(rec)) return;
-      (rec.words || []).forEach((w) => { const k = String(w).toLowerCase().trim(); if (k) counts[k] = (counts[k] || 0) + 1; });
+      (rec.words || []).forEach((w) => { const k = this._termKey(w); if (k) counts[k] = (counts[k] || 0) + 1; });
     });
     return counts;
   },
@@ -1298,11 +1376,11 @@ const Control = {
     const removed = {}, merges = {};
     const used = {};
     (proposal.removed || []).forEach((r) => {
-      const t = String(r.term || "").toLowerCase().trim();
+      const t = this._termKey(r.term);
       if (t && t in counts && !used[t]) { removed[t] = { reason: String(r.reason || "").slice(0, 120), overridden: false }; used[t] = true; }
     });
     (proposal.merges || []).forEach((g) => {
-      const members = (g.members || []).map((m) => String(m).toLowerCase().trim())
+      const members = (g.members || []).map((m) => this._termKey(m))
         .filter((m) => m in counts && !used[m]);
       const uniq = Array.from(new Set(members));
       if (uniq.length < 2) return;
@@ -1322,8 +1400,15 @@ const Control = {
       + "racial/ethnic slurs, sexual or anatomical terms (e.g. genitalia), and other offensive or sensitive "
       + "words, in ANY language. Give a short reason ('gibberish', 'profanity', 'slur', 'sexual term'). "
       + "Do NOT remove ordinary real words that merely relate to the topic. "
-      + "merges = groups of terms that mean the same thing or are minor typos of each other "
-      + "(e.g. tv/television, televsion/television). Only group clear synonyms or typos, not merely related words. "
+      + "merges = groups of terms/phrases that express the SAME underlying idea, meaning, or intent — "
+      + "including synonyms and minor typos (tv/television, televsion/television), but ALSO differently-worded "
+      + "phrases that carry the same core meaning. Judge by MEANING, not by shared words. "
+      + "Examples that SHOULD merge: 'save neighbor' + 'tell neighbors about flood' (both = warning/helping neighbours); "
+      + "'sms alert' + 'text' + 'alerts' (all = text/SMS alerts). "
+      + "Examples that should NOT merge even though they share a word: 'use neighbor's house' (seeking shelter) is a "
+      + "different idea from 'save neighbor' (helping others) — keep them separate. "
+      + "When two terms share a word but the intent differs, keep them separate; when unsure they share the same core "
+      + "meaning, keep them separate. Never merge a term into another that is clearly its opposite. "
       + "Every term/member must be copied verbatim from the input list. Output nothing but the JSON.";
     const payload = terms.map((t) => `${t} (${counts[t]})`).join(", ");
     const user = "Terms with counts:\n" + payload;
@@ -1725,11 +1810,30 @@ const Control = {
       return row;
     }).filter((r) => this.sessOK(r));
 
+    // Map each word prompt/question id to the section it belongs to, so each row
+    // is tagged with its source section (e.g. "questions" vs "wordcloud").
+    const sectionOfPrompt = {};
+    this.config.sections.forEach((s) => {
+      if (s.type === "wordcloud") (s.prompts || []).forEach((p) => { sectionOfPrompt[p.id] = s.id; });
+      if (s.type === "questionnaire") (s.questions || []).forEach((q) => { if (q.type === "word_prompt") sectionOfPrompt[q.id] = s.id; });
+    });
+
     const words = [];
     Object.keys(this.results.words || {}).forEach((uid) => Object.keys(this.results.words[uid] || {}).forEach((pid) => {
       const rec = this.results.words[uid][pid]; if (!this.sessOK(rec)) return;
-      (rec.words || []).forEach((w) => words.push({ uid, participant_no: pno(uid), prompt_id: pid, word: w, session: rec.session, ts: rec.ts }));
+      (rec.words || []).forEach((w) => words.push({ uid, participant_no: pno(uid), section: sectionOfPrompt[pid] || "", prompt_id: pid, word: w, session: rec.session, ts: rec.ts }));
     }));
+
+    // Processed word responses: same rows with the active cleaning applied —
+    // removed words dropped, merged words replaced by their main word.
+    const resolvers = {};
+    const wordsProcessed = [];
+    words.forEach((r) => {
+      if (!resolvers[r.prompt_id]) resolvers[r.prompt_id] = this._cleaningResolver(r.prompt_id);
+      const pw = resolvers[r.prompt_id](r.word);
+      if (pw === null) return;                                  // removed
+      wordsProcessed.push(Object.assign({}, r, { word: pw }));  // merged → main word, else unchanged
+    });
 
     const assess = [];
     Object.keys(this.results.assess || {}).forEach((uid) => Object.keys(this.results.assess[uid] || {}).forEach((sid) => {
@@ -1762,9 +1866,11 @@ const Control = {
     }));
 
     const tag = (this.viewSession === "(all)" || this.viewSession === "(none set)") ? "all" : this.viewSession;
+    const wordCols = ["uid", "participant_no", "section", "prompt_id", "word", "session", "ts"];
     const sets = [
       ["participants", participants, ["uid", "participant_no", "session", "section_idx", "created_at", "fields_ts", ...fieldIds]],
-      ["word_responses", words, ["uid", "participant_no", "prompt_id", "word", "session", "ts"]],
+      ["word_responses", words, wordCols],
+      ["word_responses_processed", wordsProcessed, wordCols],
       ["assessments", assess, ["uid", "participant_no", "stimulus_id", ...dims, "session", "ts"]],
       ["choices", choices, ["uid", "participant_no", "question_id", "type", "choice_idx", "choice_text", "other_text", "session", "ts"]]
     ];
